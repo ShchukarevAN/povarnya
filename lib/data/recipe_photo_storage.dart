@@ -20,6 +20,8 @@ class StoredRecipePhoto {
 class RecipePhotoStorage {
   const RecipePhotoStorage._();
 
+  static const maxStoredSide = 1024;
+
   static const _imageTypes = XTypeGroup(
     label: 'Изображения',
     extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'tif', 'tiff'],
@@ -42,9 +44,33 @@ class RecipePhotoStorage {
     required Uint8List sourceBytes,
     required Rect normalizedCrop,
   }) async {
+    final pngBytes = cropAndEncodeForStorage(
+      sourceBytes: sourceBytes,
+      normalizedCrop: normalizedCrop,
+    );
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      await RecipeDatabase().saveRecipePhotoBytes(recipeId, pngBytes);
+      return StoredRecipePhoto(bytes: pngBytes);
+    }
+    final directory = await povarnyaRecipePhotoDirectory();
+    await directory.create(recursive: true);
+    final fileName = '$recipeId.png';
+    final output = File(path.join(directory.path, fileName));
+    await output.writeAsBytes(pngBytes, flush: true);
+    await RecipeDatabase().saveRecipePhotoFileName(recipeId, fileName);
+    return StoredRecipePhoto(path: output.path);
+  }
+
+  /// Обрезает снимок и уменьшает только изображения крупнее 1024×1024.
+  /// PNG остаётся со сжатием без потерь; level влияет лишь на размер и время.
+  static Uint8List cropAndEncodeForStorage({
+    required Uint8List sourceBytes,
+    required Rect normalizedCrop,
+  }) {
     final decoded = decode(sourceBytes);
-    if (decoded == null)
+    if (decoded == null) {
       throw const FormatException('Файл не является изображением.');
+    }
     final cropSize = (normalizedCrop.width * decoded.width)
         .round()
         .clamp(
@@ -62,24 +88,22 @@ class RecipePhotoStorage {
         .round()
         .clamp(0, maxTop)
         .toInt();
-    final cropped = image.copyCrop(
+    var cropped = image.copyCrop(
       decoded,
       x: left,
       y: top,
       width: cropSize,
       height: cropSize,
     );
-    final pngBytes = Uint8List.fromList(image.encodePng(cropped, level: 9));
-    if (!Platform.isAndroid && !Platform.isIOS) {
-      await RecipeDatabase().saveRecipePhotoBytes(recipeId, pngBytes);
-      return StoredRecipePhoto(bytes: pngBytes);
+    if (cropped.width > maxStoredSide || cropped.height > maxStoredSide) {
+      cropped = image.copyResize(
+        cropped,
+        width: maxStoredSide,
+        height: maxStoredSide,
+        interpolation: image.Interpolation.cubic,
+        linearBlend: true,
+      );
     }
-    final directory = await povarnyaRecipePhotoDirectory();
-    await directory.create(recursive: true);
-    final fileName = '$recipeId.png';
-    final output = File(path.join(directory.path, fileName));
-    await output.writeAsBytes(pngBytes, flush: true);
-    await RecipeDatabase().saveRecipePhotoFileName(recipeId, fileName);
-    return StoredRecipePhoto(path: output.path);
+    return Uint8List.fromList(image.encodePng(cropped, level: 9));
   }
 }

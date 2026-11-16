@@ -551,9 +551,10 @@ class RecipeDatabase {
     _recipePhotoPaths[recipeId] = path.join(directory.path, fileName);
   }
 
-  /// На ПК данные изображения находятся в SQLite, а на телефоне — в кэше.
-  /// Этот метод не вызывается для обычного списка рецептов, поэтому BLOB
-  /// декодируется только при фактическом открытии нужного блюда.
+  /// На ПК данные изображения находятся в SQLite, а на телефоне — в закрытом
+  /// постоянном каталоге приложения. Этот метод не вызывается для обычного
+  /// списка рецептов, поэтому BLOB декодируется только при фактическом открытии
+  /// нужного блюда.
   Future<Uint8List?> loadRecipePhotoBytes(String recipeId) async {
     if (Platform.isAndroid || Platform.isIOS) return null;
     if (_recipePhotoBytes.containsKey(recipeId)) {
@@ -591,10 +592,7 @@ class RecipeDatabase {
     await database.delete('recipe_photo');
     _recipePhotoPaths.clear();
     _recipePhotoBytes.clear();
-    final photoDirectory = await povarnyaRecipePhotoDirectory();
-    if (await photoDirectory.exists()) {
-      await photoDirectory.delete(recursive: true);
-    }
+    await deletePovarnyaRecipePhotoFiles();
   }
 
   /// Сбрасывает единственное локальное хранилище приложения. После удаления
@@ -616,10 +614,7 @@ class RecipeDatabase {
     if (await dataDirectory.exists()) {
       await dataDirectory.delete(recursive: true);
     }
-    final photoDirectory = await povarnyaRecipePhotoDirectory();
-    if (await photoDirectory.exists()) {
-      await photoDirectory.delete(recursive: true);
-    }
+    await deletePovarnyaRecipePhotoFiles();
     await open();
   }
 
