@@ -11,7 +11,7 @@ void main() {
   const latestUrl =
       'https://api.github.com/repos/ShchukarevAN/povarnya/releases/latest';
   const apkUrl =
-      'https://github.com/ShchukarevAN/povarnya/releases/download/v0.6.0+2/povarnya-android.apk';
+      'https://github.com/ShchukarevAN/povarnya/releases/download/v0.6.0/povarnya-android.apk';
   final apkBytes = utf8.encode('test apk payload');
   final apkDigest = sha256.convert(apkBytes).toString();
 
@@ -21,7 +21,7 @@ void main() {
     headers: {'content-type': 'application/json; charset=utf-8'},
   );
 
-  Map<String, Object?> releaseJson({String tag = 'v0.6.0+2'}) => {
+  Map<String, Object?> releaseJson({String tag = 'v0.6.0'}) => {
     'tag_name': tag,
     'name': 'Тестовый релиз',
     'body': 'Проверка обновления',
@@ -35,19 +35,19 @@ void main() {
     ],
   };
 
-  test('читает versionCode и APK из GitHub Release', () async {
+  test('читает обычную версию и APK из GitHub Release', () async {
     final client = MockClient((_) async => jsonResponse(releaseJson(), 200));
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
       apkAssetName: 'povarnya-android.apk',
-      installedInfoOverride: (version: '0.5.0', buildNumber: 1),
+      installedVersionOverride: '0.5.0',
     );
 
     final result = await service.check();
 
     expect(result.updateAvailable, isTrue);
-    expect(result.release.buildNumber, 2);
+    expect(result.release.version, '0.6.0');
     expect(result.release.asset.sha256, apkDigest);
     service.close();
   });
@@ -67,7 +67,7 @@ void main() {
       client: client,
       latestReleaseUrl: latestUrl,
       apkAssetName: 'povarnya-android.apk',
-      installedInfoOverride: (version: '0.5.0', buildNumber: 1),
+      installedVersionOverride: '0.5.0',
       downloadDirectoryOverride: directory,
     );
 
@@ -75,7 +75,7 @@ void main() {
     final apk = await service.download(check.release);
 
     expect(await apk.readAsBytes(), apkBytes);
-    expect(apk.path, endsWith('povarnya-2.apk'));
+    expect(apk.path, endsWith('povarnya-0.6.0.apk'));
     service.close();
   });
 
@@ -90,7 +90,7 @@ void main() {
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
-      installedInfoOverride: (version: '0.5.0', buildNumber: 1),
+      installedVersionOverride: '0.5.0',
     );
 
     await expectLater(
@@ -110,12 +110,12 @@ void main() {
 
   test('объясняет неверный тег релиза', () async {
     final client = MockClient(
-      (_) async => jsonResponse(releaseJson(tag: 'v0.6.0'), 200),
+      (_) async => jsonResponse(releaseJson(tag: 'v0.6'), 200),
     );
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
-      installedInfoOverride: (version: '0.5.0', buildNumber: 1),
+      installedVersionOverride: '0.5.0',
     );
 
     await expectLater(
@@ -128,6 +128,36 @@ void main() {
         ),
       ),
     );
+    service.close();
+  });
+
+  test('сравнивает компоненты версии как числа', () async {
+    final client = MockClient(
+      (_) async => jsonResponse(releaseJson(tag: 'v0.10.0'), 200),
+    );
+    final service = UpdateService(
+      client: client,
+      latestReleaseUrl: latestUrl,
+      installedVersionOverride: '0.9.99',
+    );
+
+    final result = await service.check();
+
+    expect(result.updateAvailable, isTrue);
+    service.close();
+  });
+
+  test('не предлагает уже установленную версию', () async {
+    final client = MockClient((_) async => jsonResponse(releaseJson(), 200));
+    final service = UpdateService(
+      client: client,
+      latestReleaseUrl: latestUrl,
+      installedVersionOverride: '0.6.0',
+    );
+
+    final result = await service.check();
+
+    expect(result.updateAvailable, isFalse);
     service.close();
   });
 }

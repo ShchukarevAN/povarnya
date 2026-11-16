@@ -43,31 +43,56 @@ class UpdateAsset {
 class UpdateRelease {
   const UpdateRelease({
     required this.tag,
+    required this.version,
     required this.name,
     required this.notes,
-    required this.buildNumber,
     required this.asset,
   });
 
   final String tag;
+  final String version;
   final String name;
   final String notes;
-  final int buildNumber;
   final UpdateAsset asset;
 }
 
 class UpdateCheckResult {
   const UpdateCheckResult({
     required this.installedVersion,
-    required this.installedBuildNumber,
     required this.release,
   });
 
   final String installedVersion;
-  final int installedBuildNumber;
   final UpdateRelease release;
 
-  bool get updateAvailable => release.buildNumber > installedBuildNumber;
+  bool get updateAvailable =>
+      _compareVersions(release.version, installedVersion) > 0;
+}
+
+typedef _VersionParts = ({int major, int minor, int patch});
+
+_VersionParts? _parseVersion(String value, {bool allowVPrefix = false}) {
+  final prefix = allowVPrefix ? 'v?' : '';
+  final match = RegExp('^$prefix(\\d+)\\.(\\d+)\\.(\\d+)\$').firstMatch(value);
+  if (match == null) return null;
+  return (
+    major: int.parse(match.group(1)!),
+    minor: int.parse(match.group(2)!),
+    patch: int.parse(match.group(3)!),
+  );
+}
+
+int _compareVersions(String left, String right) {
+  final leftParts = _parseVersion(left)!;
+  final rightParts = _parseVersion(right)!;
+  for (final difference in [
+    leftParts.major - rightParts.major,
+    leftParts.minor - rightParts.minor,
+    leftParts.patch - rightParts.patch,
+  ]) {
+    if (difference != 0) return difference;
+  }
+  return 0;
 }
 
 /// A user-readable failure with stable code and full technical context.
@@ -101,7 +126,7 @@ class UpdateService {
     this.latestReleaseUrl = UpdateConfig.latestReleaseUrl,
     this.apkAssetName = UpdateConfig.apkAssetName,
     this.requireSha256 = UpdateConfig.requireSha256,
-    this.installedInfoOverride,
+    this.installedVersionOverride,
     this.downloadDirectoryOverride,
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null;
@@ -113,7 +138,7 @@ class UpdateService {
   final String latestReleaseUrl;
   final String apkAssetName;
   final bool requireSha256;
-  final ({String version, int buildNumber})? installedInfoOverride;
+  final String? installedVersionOverride;
   final Directory? downloadDirectoryOverride;
   UpdateStage? _lastLoggedStage;
 
@@ -242,18 +267,18 @@ class UpdateService {
       );
     }
 
-    final buildMatch = RegExp(r'\+(\d+)$').firstMatch(tag);
-    final buildNumber = int.tryParse(buildMatch?.group(1) ?? '');
-    if (buildNumber == null) {
+    final releaseParts = _parseVersion(tag, allowVPrefix: true);
+    if (releaseParts == null) {
       throw UpdateFailure(
         code: 'RELEASE_TAG_INVALID',
         title: 'Неверная метка релиза',
-        message: 'Метка «$tag» не содержит номер сборки.',
-        suggestion:
-            'Используйте метку вида v0.6.0+1, где 1 — Android versionCode.',
+        message: 'Метка «$tag» не является обычным номером версии.',
+        suggestion: 'Используйте метку вида v0.6.21 без номера сборки.',
         technicalDetails: 'tag_name=$tag',
       );
     }
+    final releaseVersion =
+        '${releaseParts.major}.${releaseParts.minor}.${releaseParts.patch}';
 
     Map<String, Object?>? assetJson;
     final availableNames = <String>[];
@@ -301,12 +326,22 @@ class UpdateService {
       );
     }
 
-    final installed = installedInfoOverride ?? await _installedInfo();
+    final installedVersion =
+        installedVersionOverride ?? await _installedVersion();
+    if (_parseVersion(installedVersion) == null) {
+      throw UpdateFailure(
+        code: 'INSTALLED_VERSION_INVALID',
+        title: 'Неверная установленная версия',
+        message: 'Версия «$installedVersion» имеет неизвестный формат.',
+        suggestion: 'Пересоберите приложение из актуального pubspec.yaml.',
+        technicalDetails: 'version=$installedVersion',
+      );
+    }
     final release = UpdateRelease(
       tag: tag,
+      version: releaseVersion,
       name: json['name'] is String ? json['name']! as String : tag,
       notes: json['body'] is String ? json['body']! as String : '',
-      buildNumber: buildNumber,
       asset: UpdateAsset(
         name: apkAssetName,
         url: downloadUri,
@@ -314,30 +349,22 @@ class UpdateService {
         sha256: digest,
       ),
     );
-    onLog?.call(
-      'Установлено ${installed.version}+${installed.buildNumber}; '
-      'на GitHub ${release.tag}.',
-    );
+    onLog?.call('Установлено $installedVersion; на GitHub ${release.tag}.');
     return UpdateCheckResult(
-      installedVersion: installed.version,
-      installedBuildNumber: installed.buildNumber,
+      installedVersion: installedVersion,
       release: release,
     );
   }
 
-  Future<({String version, int buildNumber})> _installedInfo() async {
+  Future<String> _installedVersion() async {
     try {
       final info = await PackageInfo.fromPlatform();
-      final buildNumber = int.tryParse(info.buildNumber);
-      if (buildNumber == null) {
-        throw FormatException('buildNumber=${info.buildNumber}');
-      }
-      return (version: info.version, buildNumber: buildNumber);
+      return info.version;
     } catch (error) {
       throw UpdateFailure(
         code: 'INSTALLED_VERSION_UNAVAILABLE',
         title: 'Не удалось определить версию',
-        message: 'Платформа не вернула Android versionCode.',
+        message: 'Платформа не вернула версию приложения.',
         suggestion: 'Пересоберите приложение из актуального pubspec.yaml.',
         technicalDetails: '$error',
       );
@@ -366,7 +393,7 @@ class UpdateService {
       );
     }
     final target = File(
-      path.join(updateDirectory.path, 'povarnya-${release.buildNumber}.apk'),
+      path.join(updateDirectory.path, 'povarnya-${release.version}.apk'),
     );
     final partial = File('${target.path}.part');
 

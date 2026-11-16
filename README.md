@@ -42,7 +42,7 @@ flutter build linux --release
 flutter build apk --release
 ```
 
-Для GitHub Release переименуйте готовый APK в `povarnya-android.apk`. Тег релиза должен совпадать с версией из `pubspec.yaml`, например `v0.6.17+1`.
+Для GitHub Release переименуйте готовый APK в `povarnya-android.apk`. Тег релиза содержит только обычную версию приложения, например `v0.6.22`; внутренний Android `versionCode` в тег не добавляется.
 
 ## Документация
 

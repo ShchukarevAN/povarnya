@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-/// Единая полноэкранная анимация ожидания «Рецептур».
+/// Единая полноэкранная анимация ожидания «Поварни».
 ///
 /// Один и тот же MP4-файл и один и тот же виджет используются при
 /// холодном запуске и во время проверки GitHub-обновления.

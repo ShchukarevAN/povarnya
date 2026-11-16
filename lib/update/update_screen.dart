@@ -244,7 +244,7 @@ class _UpdateScreenState extends State<UpdateScreen>
             ? null
             : AppBar(
                 automaticallyImplyLeading: canPop,
-                title: const Text('Обновление «Рецептур»'),
+                title: const Text('Обновление «Поварни»'),
               ),
         body: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
@@ -286,7 +286,7 @@ class _UpdateScreenState extends State<UpdateScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'На телефоне: ${result.installedVersion}+${result.installedBuildNumber}\n'
+            'На телефоне: ${result.installedVersion}\n'
             'Последний GitHub Release: ${result.release.tag}',
             textAlign: TextAlign.center,
           ),
@@ -308,7 +308,7 @@ class _UpdateScreenState extends State<UpdateScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         const Text(
-          'Android один раз просит разрешить «Рецептурам» '
+          'Android один раз просит разрешить «Поварне» '
           'запускать системный установщик. APK уже скачан и проверен.',
           textAlign: TextAlign.center,
         ),

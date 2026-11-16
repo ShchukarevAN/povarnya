@@ -20,7 +20,7 @@ void main() {
               Builder(
                 builder: (context) => IconButton(
                   key: const ValueKey('reference-button'),
-                  onPressed: () => showReferencePopover(context),
+                  onPressed: () => showSettingsPopover(context),
                   icon: const Icon(Icons.menu_book_outlined),
                 ),
               ),
@@ -33,7 +33,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reference-button')));
     await tester.pumpAndSettle();
 
-    final version = find.textContaining('Версия программы:');
+    final version = find.textContaining('Версия:');
     final update = find.text('Проверить обновления');
     expect(version, findsOneWidget);
     expect(update, findsOneWidget);
@@ -60,7 +60,7 @@ void main() {
             onProgress: onProgress,
             onLog: onLog,
             latestReleaseUrl: 'https://api.github.com/repos/ShchukarevAN/povarnya/releases/latest',
-            installedInfoOverride: (version: '0.5.0', buildNumber: 1),
+            installedVersionOverride: '0.5.0',
           ),
         ),
       ),
@@ -68,7 +68,7 @@ void main() {
     await tester.pump();
 
     expect(find.byType(PovarnyaLoadingVideo), findsOneWidget);
-    expect(find.text('Обновление «Рецептур»'), findsNothing);
+    expect(find.text('Обновление «Поварни»'), findsNothing);
 
     response.complete(
       http.Response(
