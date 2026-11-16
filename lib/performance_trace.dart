@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +11,7 @@ class PerformanceTrace {
   static final instance = PerformanceTrace._();
 
   File? _file;
+  StringBuffer _pendingFrames = StringBuffer();
   Future<void> _traceWriteQueue = Future<void>.value();
 
   Future<void> startIfRequested() async {
@@ -19,20 +21,28 @@ class PerformanceTrace {
     await _file!.parent.create(recursive: true);
     await _file!.writeAsString('');
     SchedulerBinding.instance.addTimingsCallback(_recordFrames);
+    Timer.periodic(const Duration(seconds: 1), (_) => _flushPendingFrames());
   }
 
   void _recordFrames(List<FrameTiming> frames) {
-    final file = _file;
-    if (file == null) return;
+    if (_file == null) return;
     for (final frame in frames) {
       final event = jsonEncode({
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'buildUs': frame.buildDuration.inMicroseconds,
         'rasterUs': frame.rasterDuration.inMicroseconds,
       });
-      _traceWriteQueue = _traceWriteQueue.then(
-        (_) => file.writeAsString('$event\n', mode: FileMode.append),
-      );
+      _pendingFrames.writeln(event);
     }
+  }
+
+  void _flushPendingFrames() {
+    final file = _file;
+    if (file == null || _pendingFrames.length == 0) return;
+    final batch = _pendingFrames.toString();
+    _pendingFrames = StringBuffer();
+    _traceWriteQueue = _traceWriteQueue.then(
+      (_) => file.writeAsString(batch, mode: FileMode.append),
+    );
   }
 }

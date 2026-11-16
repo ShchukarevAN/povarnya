@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../app_theme.dart';
+import '../domain/catalog.dart';
+import '../domain/recipe_node.dart';
 
 class SourceFunction {
   const SourceFunction({
@@ -82,18 +84,32 @@ class RecipeStructureNode {
   final children = <RecipeStructureNode>[];
 }
 
+class ProjectAudit {
+  const ProjectAudit({
+    required this.title,
+    required this.passed,
+    required this.details,
+  });
+
+  final String title;
+  final bool passed;
+  final String details;
+}
+
 class ProjectSnapshot {
   const ProjectSnapshot({
     required this.functions,
     required this.modules,
     required this.recipes,
     required this.databaseBytes,
+    required this.audits,
   });
 
   final List<SourceFunction> functions;
   final List<ModuleStatistic> modules;
   final List<RecipeStructure> recipes;
   final int databaseBytes;
+  final List<ProjectAudit> audits;
 }
 
 class ProjectAnalyzerService {
@@ -103,12 +119,347 @@ class ProjectAnalyzerService {
   Future<ProjectSnapshot> scanProject() async {
     final functions = await _scanFunctions();
     final database = await _scanDatabase();
+    final audits = await _scanAudits();
     return ProjectSnapshot(
       functions: functions,
       modules: database.$1,
       recipes: database.$2,
       databaseBytes: database.$3,
+      audits: audits,
     );
+  }
+
+  Future<List<ProjectAudit>> _scanAudits() async => [
+    _auditRecipeIngredients(),
+    await _auditFastingReset(),
+    await _auditSearchCalculation(),
+    await _auditModuleFiltering(),
+    await _auditApplicationVersion(),
+    await _auditCatalogWithoutStartupMigrations(),
+    await _auditAnalyzerScope(),
+    await _auditProfilerIsolation(),
+    await _auditSingleRecipeRenderer(),
+    await _auditRecipeNodePersistence(),
+  ];
+
+  ProjectAudit _auditRecipeIngredients() {
+    final mismatches = <String>[];
+    for (final recipe in catalogRecipes) {
+      final fromTree = <String>{};
+
+      void visit(RecipeNode node) {
+        if (node.card.kind == CardKind.ingredient) {
+          fromTree.add(node.card.nominative);
+        }
+        for (final child in node.children) {
+          visit(child);
+        }
+      }
+
+      for (final step in recipe.buildSteps()) {
+        visit(step);
+      }
+      if (fromTree.length != recipe.ingredients.length ||
+          !fromTree.containsAll(recipe.ingredients)) {
+        mismatches.add(recipe.id);
+      }
+    }
+    return ProjectAudit(
+      title: 'Единый состав рецептов',
+      passed: mismatches.isEmpty,
+      details: mismatches.isEmpty
+          ? 'Все ${catalogRecipes.length} рецептов получают состав из модульного дерева без расхождений.'
+          : 'Состав расходится с деревом: ${mismatches.join(', ')}',
+    );
+  }
+
+  Future<ProjectAudit> _auditFastingReset() async {
+    final source = await File('$root/lib/data/recipe_database.dart')
+        .readAsString();
+    final body = _block(source, 'Future<void> resetLocalData()');
+    final passed = body?.contains('_recipeFasting.clear()') ?? false;
+    return ProjectAudit(
+      title: 'Полный сброс кэша рецептов',
+      passed: passed,
+      details: passed
+          ? 'resetLocalData очищает кэш постности вместе с остальными данными.'
+          : 'В resetLocalData отсутствует _recipeFasting.clear().',
+    );
+  }
+
+  Future<ProjectAudit> _auditSearchCalculation() async {
+    final source = await File(
+      '$root/lib/presentation/recipe_search_screen.dart',
+    ).readAsString();
+    final state = _block(source, 'class _RecipeSearchScreenState');
+    final build = state == null
+        ? null
+        : _block(state, 'Widget build(BuildContext context)');
+    final categories = state == null
+        ? null
+        : _block(state, 'List<Widget> _categorySections');
+    final resultReads = build == null
+        ? 0
+        : RegExp(r'\b_results\b').allMatches(build).length;
+    final passed =
+        resultReads == 1 && !(categories?.contains('_results') ?? true);
+    return ProjectAudit(
+      title: 'Однократный расчёт поиска',
+      passed: passed,
+      details: passed
+          ? 'Результаты вычисляются один раз за build и передаются в группировку категорий.'
+          : 'Ожидалось одно чтение _results в build и ни одного внутри _categorySections; найдено $resultReads.',
+    );
+  }
+
+  Future<ProjectAudit> _auditModuleFiltering() async {
+    final source = await File('$root/lib/presentation/recipe_screen.dart')
+        .readAsString();
+    final state = _block(source, 'class _CardLibraryState');
+    final matching = state == null
+        ? null
+        : _block(state, 'List<CardDefinition> _matching');
+    final catalogScans = state == null
+        ? 0
+        : RegExp(r'\bCatalogCards\.all\b').allMatches(state).length;
+    final passed =
+        state != null &&
+        state.contains('static final _cardsByKind') &&
+        catalogScans == 1 &&
+        !(matching?.contains('searchAndSortByLabel') ?? true);
+    return ProjectAudit(
+      title: 'Кэшированная фильтрация модулей',
+      passed: passed,
+      details: passed
+          ? 'Каталог группируется и сортируется один раз; ввод выполняет только линейную фильтрацию.'
+          : 'Библиотека модулей снова сканирует или сортирует CatalogCards.all во время build.',
+    );
+  }
+
+  Future<ProjectAudit> _auditApplicationVersion() async {
+    final lib = Directory('$root/lib');
+    final declarations = <String>[];
+    var hasAlias = false;
+    await for (final item in lib.list(recursive: true)) {
+      if (item is! File || !item.path.endsWith('.dart')) continue;
+      final source = await item.readAsString();
+      if (RegExp(
+        r'\b(?:final(?:\s+Future<String>)?|const|String)\s+appVersionLabel\b',
+      ).hasMatch(source)) {
+        hasAlias = true;
+      }
+      for (final _ in RegExp(
+        r'\b(?:final(?:\s+Future<String>)?|const|String)\s+appVersion\b',
+      ).allMatches(source)) {
+        declarations.add(item.path.substring(root.length + 1));
+      }
+    }
+    final versionSource = File('$root/lib/app_version.dart');
+    final versionText = await versionSource.exists()
+        ? await versionSource.readAsString()
+        : '';
+    final readme = File('$root/README.md');
+    final readmeText = await readme.exists() ? await readme.readAsString() : '';
+    final passed =
+        declarations.length == 1 &&
+        declarations.single == 'lib/app_version.dart' &&
+        versionText.contains('PackageInfo.fromPlatform()') &&
+        !hasAlias &&
+        !readmeText.contains('Текущая версия:');
+    return ProjectAudit(
+      title: 'Единый источник версии приложения',
+      passed: passed,
+      details: passed
+          ? 'Версия читается из сборочных метаданных одной переменной appVersion; алиасов и копии в README нет.'
+          : 'Найдены лишние объявления версии, appVersionLabel или вручную записанная текущая версия.',
+    );
+  }
+
+  Future<ProjectAudit> _auditCatalogWithoutStartupMigrations() async {
+    final databaseSource = await File('$root/lib/data/recipe_database.dart')
+        .readAsString();
+    const obsoleteMigrations = [
+      '_normalizeMulticookerSteps',
+      '_setExistingEggCategories',
+      '_completeRequiredCookingTimes',
+    ];
+    final presentMigrations = obsoleteMigrations
+        .where(databaseSource.contains)
+        .toList();
+    final missingEggCategories = <String>[];
+    final legacyMulticookerSteps = <String>[];
+    final times = <String, (int, int?)>{};
+
+    bool containsCard(RecipeNode node, String cardId) {
+      if (node.card.id == cardId) return true;
+      return node.children.any((child) => containsCard(child, cardId));
+    }
+
+    void visit(RecipeNode node) {
+      if (node.card.id == 'ingredient.eggs' &&
+          (node.text == null || node.text!.trim().isEmpty)) {
+        missingEggCategories.add(node.id);
+      }
+      if (node.card.id == 'action.select' &&
+          containsCard(node, 'utensil.multicooker-program')) {
+        legacyMulticookerSteps.add(node.id);
+      }
+      final time = node.children
+          .where((child) => child.card.id == 'quantity.time')
+          .firstOrNull;
+      if (time?.value != null) times[node.id] = (time!.value!, time.upperValue);
+      for (final child in node.children) {
+        visit(child);
+      }
+    }
+
+    for (final recipe in catalogRecipes) {
+      for (final step in recipe.buildSteps()) {
+        visit(step);
+      }
+    }
+    const requiredTimes = <String, (int, int?)>{
+      'cocoa-4': (1, null),
+      'squash-caviar-3': (5, null),
+      'squash-caviar-4': (5, null),
+      'squash-caviar-5': (5, null),
+      'soviet-goulash-2': (3, null),
+      'soviet-goulash-4': (2, null),
+      'soviet-goulash-8': (5, 7),
+      'soviet-goulash-10': (5, null),
+      'soviet-goulash-14': (5, null),
+    };
+    final incorrectTimes = requiredTimes.entries
+        .where((entry) => times[entry.key] != entry.value)
+        .map((entry) => entry.key)
+        .toList();
+    final passed =
+        presentMigrations.isEmpty &&
+        missingEggCategories.isEmpty &&
+        legacyMulticookerSteps.isEmpty &&
+        incorrectTimes.isEmpty;
+    final problems = <String>[
+      if (presentMigrations.isNotEmpty)
+        'остались миграции: ${presentMigrations.join(', ')}',
+      if (missingEggCategories.isNotEmpty)
+        'яйца без категории: ${missingEggCategories.join(', ')}',
+      if (legacyMulticookerSteps.isNotEmpty)
+        'старые шаги мультиварки: ${legacyMulticookerSteps.join(', ')}',
+      if (incorrectTimes.isNotEmpty)
+        'нет исходных интервалов: ${incorrectTimes.join(', ')}',
+    ];
+    return ProjectAudit(
+      title: 'Самодостаточный каталог без стартовых миграций',
+      passed: passed,
+      details: passed
+          ? 'Категории яиц, интервалы времени и актуальные шаги мультиварки заданы в исходном каталоге; миграций при запуске нет.'
+          : problems.join('; '),
+    );
+  }
+
+  Future<ProjectAudit> _auditAnalyzerScope() async {
+    final options = await File('$root/analysis_options.yaml').readAsString();
+    const requiredExclusions = [
+      '.dart_tool/**',
+      'Инструментарий/**',
+      'third_party/**',
+    ];
+    final missing = requiredExclusions
+        .where((path) => !options.contains('- $path'))
+        .toList();
+    return ProjectAudit(
+      title: 'Границы статического анализа',
+      passed: missing.isEmpty,
+      details: missing.isEmpty
+          ? 'Кэши, локальный Flutter SDK и сторонний код исключены из анализа проекта.'
+          : 'Не исключены служебные каталоги: ${missing.join(', ')}',
+    );
+  }
+
+  Future<ProjectAudit> _auditProfilerIsolation() async {
+    final writer = await File('$root/lib/performance_trace.dart')
+        .readAsString();
+    final analyzer = await File(
+      '$root/lib/presentation/project_analyzer_screen.dart',
+    ).readAsString();
+    final recordFrames = _block(writer, 'void _recordFrames');
+    final runtime = _block(
+      analyzer,
+      'class _Runtime'
+      'TabState',
+    );
+    final readTrace = runtime == null
+        ? null
+        : _block(runtime, 'Future<void> _readFrameTrace()');
+    final batchedWrites =
+        writer.contains('Timer.periodic(') &&
+        writer.contains('_pendingFrames') &&
+        writer.contains('void _flushPendingFrames()') &&
+        !(recordFrames?.contains('writeAsString') ?? true);
+    final incrementalReads =
+        analyzer.contains('_traceReadOffset') &&
+        (readTrace?.contains('openRead(_traceReadOffset') ?? false) &&
+        !(readTrace?.contains('readAsLines') ?? true);
+    final passed = batchedWrites && incrementalReads;
+    return ProjectAudit(
+      title: 'Профилировщик не искажает измерения',
+      passed: passed,
+      details: passed
+          ? 'Кадры накапливаются в памяти и записываются пакетами; анализатор читает только новые байты трассы.'
+          : 'Трассировка снова выполняет файловую запись на каждый кадр или перечитывает файл целиком.',
+    );
+  }
+
+  Future<ProjectAudit> _auditSingleRecipeRenderer() async {
+    final source = await File('$root/lib/domain/recipe_renderer.dart')
+        .readAsString();
+    final stringRenderers = RegExp(r'\bString\s+render\s*\(')
+        .allMatches(source)
+        .length;
+    final partRenderers = RegExp(r'\bList<RecipeRenderPart>\s+renderParts\s*\(')
+        .allMatches(source)
+        .length;
+    final passed = stringRenderers == 0 && partRenderers == 1;
+    return ProjectAudit(
+      title: 'Единый сборщик предложения рецепта',
+      passed: passed,
+      details: passed
+          ? 'Предложение собирает только renderParts; параллельной строковой реализации render нет.'
+          : 'Ожидался один renderParts и отсутствие отдельного String render; найдено: $partRenderers и $stringRenderers.',
+    );
+  }
+
+  Future<ProjectAudit> _auditRecipeNodePersistence() async {
+    final source = await File('$root/lib/data/recipe_database.dart')
+        .readAsString();
+    final nodeInserts = RegExp(r"batch\.insert\('node'")
+        .allMatches(source)
+        .length;
+    final serializerReferences = RegExp(r'\b_addNodeTree\s*\(')
+        .allMatches(source)
+        .length;
+    final passed = nodeInserts == 1 && serializerReferences == 4;
+    return ProjectAudit(
+      title: 'Единая сериализация дерева RecipeNode',
+      passed: passed,
+      details: passed
+          ? 'Сохранение, заполнение и обновление каталога используют один _addNodeTree.'
+          : 'Ожидалась одна реализация INSERT node и три её вызова; найдено: $nodeInserts и ${serializerReferences - 1}.',
+    );
+  }
+
+  String? _block(String source, String marker) {
+    final markerIndex = source.indexOf(marker);
+    if (markerIndex < 0) return null;
+    final start = source.indexOf('{', markerIndex);
+    if (start < 0) return null;
+    var depth = 0;
+    for (var index = start; index < source.length; index++) {
+      if (source[index] == '{') depth++;
+      if (source[index] == '}') depth--;
+      if (depth == 0) return source.substring(markerIndex, index + 1);
+    }
+    return null;
   }
 
   Future<List<SourceFunction>> _scanFunctions() async {
@@ -307,7 +658,7 @@ class _ProjectAnalyzerScreenState extends State<ProjectAnalyzerScreen> {
   @override
   Widget build(BuildContext context) => SelectionArea(
     child: DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Анализатор проекта «Поварня»'),
@@ -321,6 +672,7 @@ class _ProjectAnalyzerScreenState extends State<ProjectAnalyzerScreen> {
           bottom: const TabBar(
             tabs: [
               Tab(text: 'Код'),
+              Tab(text: 'Проверки'),
               Tab(text: 'База данных'),
               Tab(text: 'Производительность'),
             ],
@@ -337,6 +689,7 @@ class _ProjectAnalyzerScreenState extends State<ProjectAnalyzerScreen> {
             return TabBarView(
               children: [
                 _CodeTab(functions: data.functions),
+                _AuditTab(audits: data.audits),
                 _DatabaseTab(snapshot: data),
                 _RuntimeTab(root: _projectRoot),
               ],
@@ -346,6 +699,39 @@ class _ProjectAnalyzerScreenState extends State<ProjectAnalyzerScreen> {
       ),
     ),
   );
+}
+
+class _AuditTab extends StatelessWidget {
+  const _AuditTab({required this.audits});
+  final List<ProjectAudit> audits;
+
+  @override
+  Widget build(BuildContext context) {
+    final passed = audits.where((audit) => audit.passed).length;
+    final colors = Theme.of(context).colorScheme;
+    final semantic = semanticColors(context);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'Пройдено $passed из ${audits.length} целевых проверок',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        for (final audit in audits)
+          Card(
+            child: ListTile(
+              leading: Icon(
+                audit.passed ? Icons.check_circle : Icons.error,
+                color: audit.passed ? semantic.success : colors.error,
+              ),
+              title: Text(audit.title),
+              subtitle: Text(audit.details),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 enum _SortField { name, size, occurrences }
@@ -714,7 +1100,8 @@ class _RuntimeTabState extends State<_RuntimeTab> {
   int _memoryBytes = 0;
   int _cpuTicks = 0;
   final _frames = <_FrameSample>[];
-  int _readTraceLines = 0;
+  int _traceReadOffset = 0;
+  String _traceRemainder = '';
 
   String get _program =>
       '${widget.root}/build/linux/x64/release/bundle/povarnya';
@@ -726,7 +1113,8 @@ class _RuntimeTabState extends State<_RuntimeTab> {
     if (!await executable.exists()) return;
     await File(_trace).writeAsString('');
     _frames.clear();
-    _readTraceLines = 0;
+    _traceReadOffset = 0;
+    _traceRemainder = '';
     final process = await Process.start(
       executable.path,
       [],
@@ -767,9 +1155,22 @@ class _RuntimeTabState extends State<_RuntimeTab> {
   Future<void> _readFrameTrace() async {
     final trace = File(_trace);
     if (!await trace.exists()) return;
-    final lines = await trace.readAsLines();
-    if (lines.length <= _readTraceLines) return;
-    for (final line in lines.skip(_readTraceLines)) {
+    final length = await trace.length();
+    if (length < _traceReadOffset) {
+      _traceReadOffset = 0;
+      _traceRemainder = '';
+    }
+    if (length == _traceReadOffset) return;
+    final addition = await trace
+        .openRead(_traceReadOffset, length)
+        .transform(utf8.decoder)
+        .join();
+    _traceReadOffset = length;
+    final content = '$_traceRemainder$addition';
+    final lines = content.split('\n');
+    _traceRemainder = content.endsWith('\n') ? '' : lines.removeLast();
+    if (lines.isNotEmpty && lines.last.isEmpty) lines.removeLast();
+    for (final line in lines) {
       try {
         final values = jsonDecode(line) as Map<String, dynamic>;
         _frames.add(
@@ -783,7 +1184,6 @@ class _RuntimeTabState extends State<_RuntimeTab> {
         // Последняя строка может читаться одновременно с записью кадра.
       }
     }
-    _readTraceLines = lines.length;
     if (_frames.length > 90) _frames.removeRange(0, _frames.length - 90);
     if (mounted) setState(() {});
   }

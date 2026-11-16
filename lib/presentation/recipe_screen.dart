@@ -1944,22 +1944,25 @@ class _CardLibraryState extends State<_CardLibrary> {
     'utensil.rolling-pin',
   };
 
-  List<CardDefinition> _group(CardKind kind) {
-    return searchAndSortByLabel(
-      CatalogCards.all.where((card) => card.kind == kind),
-      query: '',
-      labelOf: (card) => card.nominative,
-    );
-  }
+  static final _cardsByKind = <CardKind, List<CardDefinition>>{
+    for (final kind in CardKind.values)
+      kind: searchAndSortByLabel(
+        CatalogCards.all.where((card) => card.kind == kind),
+        query: '',
+        labelOf: (card) => card.nominative,
+      ),
+  };
 
   /// Песочница использует ту же единственную классификацию, что и фильтры
   /// поиска. Новая группа или карточка не требуют второго списка идентификаторов.
-  List<CardDefinition> _ingredientsIn(IngredientGroup group) =>
-      _group(CardKind.ingredient)
+  static final _ingredientsByGroup = <IngredientGroup, List<CardDefinition>>{
+    for (final group in IngredientGroup.values)
+      group: _cardsByKind[CardKind.ingredient]!
           .where((card) => CatalogCards.ingredientGroup(card) == group)
-          .toList();
+          .toList(),
+  };
 
-  List<CardDefinition> _actions() => _group(CardKind.action)
+  static final _actions = _cardsByKind[CardKind.action]!
       .where(
         (card) =>
             !cookingActionCardIds.contains(card.id) &&
@@ -1968,37 +1971,40 @@ class _CardLibraryState extends State<_CardLibrary> {
       )
       .toList();
 
-  List<CardDefinition> _cookingActions() =>
-      _group(CardKind.action)
-          .where((card) => cookingActionCardIds.contains(card.id))
-          .toList();
+  static final _cookingActions = _cardsByKind[CardKind.action]!
+      .where((card) => cookingActionCardIds.contains(card.id))
+      .toList();
 
-  List<CardDefinition> _preparationActions() =>
-      _group(CardKind.action)
-          .where((card) => preparationActionCardIds.contains(card.id))
-          .toList();
+  static final _preparationActions = _cardsByKind[CardKind.action]!
+      .where((card) => preparationActionCardIds.contains(card.id))
+      .toList();
 
-  List<CardDefinition> _assemblyActions() =>
-      _group(CardKind.action)
-          .where((card) => assemblyActionCardIds.contains(card.id))
-          .toList();
+  static final _assemblyActions = _cardsByKind[CardKind.action]!
+      .where((card) => assemblyActionCardIds.contains(card.id))
+      .toList();
 
-  List<CardDefinition> _quantities() =>
-      _group(CardKind.quantity)
-          .where((card) => !_characteristicIds.contains(card.id))
-          .toList();
+  static final _quantities = _cardsByKind[CardKind.quantity]!
+      .where((card) => !_characteristicIds.contains(card.id))
+      .toList();
 
-  List<CardDefinition> _characteristics() =>
-      _group(CardKind.quantity)
-          .where((card) => _characteristicIds.contains(card.id))
-          .toList();
+  static final _characteristics = _cardsByKind[CardKind.quantity]!
+      .where((card) => _characteristicIds.contains(card.id))
+      .toList();
+
+  static final _appliances = _cardsByKind[CardKind.utensil]!
+      .where((card) => _applianceIds.contains(card.id))
+      .toList();
+
+  static final _utensils = _cardsByKind[CardKind.utensil]!
+      .where((card) => !_applianceIds.contains(card.id))
+      .toList();
 
   List<CardDefinition> _matching(List<CardDefinition> cards) {
-    return searchAndSortByLabel(
-      cards,
-      query: _query,
-      labelOf: (card) => card.nominative,
-    );
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return cards;
+    return cards
+        .where((card) => card.nominative.toLowerCase().contains(query))
+        .toList();
   }
 
   Widget _section(String title, List<CardDefinition> cards) {
@@ -2050,28 +2056,18 @@ class _CardLibraryState extends State<_CardLibrary> {
               ],
             ),
             SizedBox(height: widget.compactVertical ? 4 : 16),
-            _section('Подготовка', _preparationActions()),
-            _section('Сборка', _assemblyActions()),
-            _section('Готовка', _cookingActions()),
-            _section('Действия', _actions()),
+            _section('Подготовка', _preparationActions),
+            _section('Сборка', _assemblyActions),
+            _section('Готовка', _cookingActions),
+            _section('Действия', _actions),
             ...IngredientGroup.values.map(
-              (group) => _section(group.title, _ingredientsIn(group)),
+              (group) => _section(group.title, _ingredientsByGroup[group]!),
             ),
-            _section('Количество', _quantities()),
-            _section('Характеристики', _characteristics()),
-            _section(
-              'Приборы',
-              _group(CardKind.utensil)
-                  .where((card) => _applianceIds.contains(card.id))
-                  .toList(),
-            ),
-            _section(
-              'Утварь',
-              _group(CardKind.utensil)
-                  .where((card) => !_applianceIds.contains(card.id))
-                  .toList(),
-            ),
-            _section('Иное', _group(CardKind.text)),
+            _section('Количество', _quantities),
+            _section('Характеристики', _characteristics),
+            _section('Приборы', _appliances),
+            _section('Утварь', _utensils),
+            _section('Иное', _cardsByKind[CardKind.text]!),
           ],
         ),
         if (widget.showDiscardOverlay)

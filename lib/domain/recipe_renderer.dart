@@ -144,109 +144,14 @@ String? joinTextForChild(RecipeNode parent, RecipeNode child) {
   return null;
 }
 
-/// Преобразует редактируемое дерево в одну естественную строку рецепта.
+/// Преобразует редактируемое дерево в видимые фрагменты предложения.
 class RecipeRenderer {
   const RecipeRenderer();
 
-  /// Сворачивает дерево шага в строку для просмотра рецепта.
-  ///
-  /// [servings] и [recipeMultiplier] влияют на все пищевые количества:
-  /// массу, объём, штуки и ложки.
-  /// Исходные числовые значения в [RecipeNode] при этом не меняются: они
-  /// остаются базовыми значениями рецепта и сохраняются в БД без пересчёта.
-  String render(
-    RecipeNode node, {
-    int servings = 1,
-    int recipeMultiplier = 1,
-    GrammarCase? caseOverride,
-  }) {
-    final isParameter =
-        node.card.id == 'quantity.mass' ||
-        node.card.id == 'quantity.volume' ||
-        node.card.id == 'quantity.time' ||
-        node.card.id == 'quantity.temperature' ||
-        node.card.id == 'quantity.count' ||
-        node.card.id == 'quantity.fat-content';
-    if (node.card.id == 'text.free') return node.text?.trim() ?? '';
-    if (node.card.id == 'characteristic.shape') {
-      return node.text?.trim() ?? 'кубиками';
-    }
-    if (node.card.id == 'quantity.spoon') {
-      return _formatSpoon(
-        node.text?.trim().isNotEmpty == true ? node.text!.trim() : '1 ч. л.',
-        servings: servings,
-        recipeMultiplier: recipeMultiplier,
-      );
-    }
-    if (node.card.id == 'ingredient.minced-meat') {
-      final specification = node.text?.trim() ?? '';
-      final label = node.card.formFor(caseOverride ?? node.caseFromParent);
-      return specification.isEmpty ? label : '$label $specification';
-    }
-    if (node.card.id == 'utensil.multicooker-program') {
-      final program = node.text?.trim() ?? '';
-      final label = node.card.formFor(caseOverride ?? node.caseFromParent);
-      return program.isEmpty ? label : '$label «$program»';
-    }
-    final eggCategory = node.card.id == 'ingredient.eggs'
-        ? node.text?.trim() ?? ''
-        : '';
-    final buffer = StringBuffer(
-      isParameter
-          ? ''
-          : '${node.card.formFor(caseOverride ?? node.caseFromParent)}${eggCategory.isEmpty ? '' : ' $eggCategory'}',
-    );
-    if (node.value != null && node.unit != null) {
-      final suffix = switch (node.unit!) {
-        NumericUnit.grams => ' г',
-        NumericUnit.milliliters => ' мл',
-        NumericUnit.minutes => ' минут',
-        NumericUnit.celsius => ' °C',
-        NumericUnit.pieces => ' шт.',
-        NumericUnit.percent => '%',
-      };
-      final lower = _formatValue(
-        node.value!,
-        node.unit!,
-        servings: servings,
-        recipeMultiplier: recipeMultiplier,
-      );
-      final upper = node.upperValue == null
-          ? ''
-          : '–${_formatValue(node.upperValue!, node.unit!, servings: servings, recipeMultiplier: recipeMultiplier)}';
-      buffer.write('${isParameter ? '' : ' '}$lower$upper$suffix');
-    }
-    RecipeNode? previous;
-    for (final child in node.children) {
-      final renderedChild = render(
-        child,
-        servings: servings,
-        recipeMultiplier: recipeMultiplier,
-        caseOverride: grammarCaseForChild(node, child),
-      );
-      if (renderedChild.isEmpty) continue;
-      final separator =
-          joinTextForChild(node, child) ??
-          (node.card.id == 'action.leave' && child.card.id == 'quantity.time'
-              ? ' на '
-              : node.card.kind == CardKind.ingredient &&
-                    child.card.kind == CardKind.quantity
-              ? ' '
-              : previous != null &&
-                    previous.card.kind == child.card.kind &&
-                    child.joinWithPrevious == ' '
-              ? ', '
-              : child.joinWithPrevious);
-      buffer.write(separator);
-      buffer.write(renderedChild);
-      previous = child;
-    }
-    return buffer.toString().replaceAll(RegExp(r'\\s+'), ' ').trim();
-  }
-
   /// Возвращает видимые подписи всех модулей и разделители между ними.
-  /// В отличие от [render] не сливает их в одну строку, чтобы интерфейс мог
-  /// измерить и анимировать каждый узел дерева отдельно.
+  /// Не сливает их в одну строку, чтобы интерфейс мог измерить и анимировать
+  /// каждый узел дерева отдельно. [servings] и [recipeMultiplier] масштабируют
+  /// пищевые количества, не меняя исходные значения узлов в БД.
   List<RecipeRenderPart> renderParts(
     RecipeNode node, {
     int servings = 1,

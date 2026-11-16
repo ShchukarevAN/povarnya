@@ -1,14 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'app_version.dart';
 import 'data/app_settings.dart';
 import 'data/recipe_database.dart';
 import 'update/update_screen.dart';
-
-/// Версия имеет формат 0.<основная версия>.<итерация кода>.
-/// Последняя цифра увеличивается при каждом изменении исходного кода и
-/// синхронизируется с `pubspec.yaml`.
-const appVersion = '0.6.24';
-const appVersionLabel = appVersion;
 
 /// Показывает настройки непосредственно под кнопкой, не перехватывая
 /// клавиатурный фокус. Меню закрывается нажатием вне него.
@@ -134,10 +129,13 @@ class _SettingsMenuEntryState extends State<_SettingsMenuEntry> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Версия: $appVersionLabel',
-            style: Theme.of(context).textTheme.bodyLarge
-                ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+          FutureBuilder<String>(
+            future: appVersion,
+            builder: (context, snapshot) => Text(
+              'Версия: ${snapshot.data ?? '—'}',
+              style: Theme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
+            ),
           ),
           const SizedBox(height: 8),
           FilledButton.tonalIcon(

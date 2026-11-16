@@ -48,138 +48,7 @@ class RecipeDatabase {
       await _addMissingCatalogEntries(_database!);
       await _writeCatalogRevision(_database!);
     }
-    await _normalizeMulticookerSteps(_database!);
-    await _setExistingEggCategories(_database!);
-    await _completeRequiredCookingTimes(_database!);
     return _database!;
-  }
-
-  /// Дополяет только отсутствующие интервалы у старых встроенных шагов.
-  /// Уже введённое пользователем время не перезаписывается.
-  Future<void> _completeRequiredCookingTimes(Database database) async {
-    const durations = <String, (int, int?)>{
-      'cocoa-4': (1, null),
-      'squash-caviar-3': (5, null),
-      'squash-caviar-4': (5, null),
-      'squash-caviar-5': (5, null),
-      'soviet-goulash-2': (3, null),
-      'soviet-goulash-4': (2, null),
-      'soviet-goulash-8': (5, 7),
-      'soviet-goulash-10': (5, null),
-      'soviet-goulash-14': (5, null),
-    };
-    await database.transaction((transaction) async {
-      for (final entry in durations.entries) {
-        final actions = await transaction.query(
-          'node',
-          columns: ['id', 'root_id'],
-          where: 'id LIKE ?',
-          whereArgs: ['%.${entry.key}'],
-        );
-        for (final action in actions) {
-          final actionId = action['id'] as String;
-          final hasTime = await transaction.query(
-            'node',
-            columns: ['id'],
-            where: "parent_id = ? AND card_id = 'quantity.time'",
-            whereArgs: [actionId],
-            limit: 1,
-          );
-          if (hasTime.isNotEmpty) continue;
-          await transaction.insert('node', {
-            'id': '$actionId.time',
-            'root_id': action['root_id'],
-            'parent_id': actionId,
-            'card_id': 'quantity.time',
-            'sort_order': 99,
-            'grammar_case': GrammarCase.unspecified.index,
-            'join_text': ' ',
-            'value': entry.value.$1,
-            'upper_value': entry.value.$2,
-            'numeric_unit': NumericUnit.minutes.index,
-          });
-        }
-      }
-    });
-  }
-
-  /// У старых рецептов категория яйца не записывалась. В обсуждённых
-  /// исходниках использовались небольшие яйца С2; новый узел в редакторе
-  /// по умолчанию создаётся с категорией С1.
-  Future<void> _setExistingEggCategories(Database database) => database.update(
-    'node',
-    {'text_value': 'С2'},
-    where: "card_id = 'ingredient.eggs' AND (text_value IS NULL OR text_value = '')",
-  );
-
-  /// Переводит старую связку «Выбрать программу» в единый шаг
-  /// «Включить мультиварку программу …». Начальные подготовительные строки
-  /// удаляются: мультиварка появляется ровно в момент её включения.
-  Future<void> _normalizeMulticookerSteps(Database database) async {
-    await database.transaction((transaction) async {
-      final roots = await transaction.rawQuery('''
-        SELECT DISTINCT root_id FROM node
-        WHERE card_id = 'utensil.multicooker-program'
-      ''');
-      for (final root in roots) {
-        final rootId = root['root_id'] as String;
-        final obsolete = await transaction.query(
-          'node',
-          columns: ['id'],
-          where: '''root_id = ? AND parent_id IS NULL AND card_id = 'action.prepare'
-            AND NOT EXISTS (
-              SELECT 1 FROM node device
-              JOIN node program ON program.parent_id = device.id
-              WHERE device.parent_id = node.id
-                AND program.card_id = 'utensil.multicooker-program'
-            )''',
-          whereArgs: [rootId],
-        );
-        for (final row in obsolete) {
-          final id = row['id'] as String;
-          await transaction.delete(
-            'node',
-            where: 'parent_id = ?',
-            whereArgs: [id],
-          );
-          await transaction.delete('node', where: 'id = ?', whereArgs: [id]);
-        }
-      }
-      final selections = await transaction.rawQuery('''
-        SELECT selected.id AS selected_id, selected.root_id AS root_id,
-               program.id AS program_id
-        FROM node selected
-        JOIN node program ON program.parent_id = selected.id
-        WHERE selected.card_id = 'action.select'
-          AND program.card_id = 'utensil.multicooker-program'
-      ''');
-      for (final selection in selections) {
-        final selectedId = selection['selected_id'] as String;
-        final programId = selection['program_id'] as String;
-        final deviceId = '$selectedId.multicooker';
-        await transaction.update(
-          'node',
-          {'card_id': 'action.prepare'},
-          where: 'id = ?',
-          whereArgs: [selectedId],
-        );
-        await transaction.insert('node', {
-          'id': deviceId,
-          'root_id': selection['root_id'] as String,
-          'parent_id': selectedId,
-          'card_id': 'utensil.moulinex-ce5a0ff2',
-          'sort_order': 0,
-          'grammar_case': GrammarCase.accusative.index,
-          'join_text': ' ',
-        });
-        await transaction.update(
-          'node',
-          {'parent_id': deviceId, 'sort_order': 0},
-          where: 'id = ?',
-          whereArgs: [programId],
-        );
-      }
-    });
   }
 
   Future<void> _createSchema(Database database, int version) async {
@@ -606,6 +475,7 @@ class RecipeDatabase {
     _recipeServings.clear();
     _recipeMultipliers.clear();
     _recipeCategories.clear();
+    _recipeFasting.clear();
     _recipeFavorites.clear();
     _recipePhotoPaths.clear();
     _recipePhotoBytes.clear();
@@ -728,28 +598,7 @@ class RecipeDatabase {
       whereArgs: [recipeId],
     );
 
-    void addNode(RecipeNode node, String? parentId, int order) {
-      batch.insert('node', {
-        'id': '$recipeId.${node.id}',
-        'root_id': recipeId,
-        'parent_id': parentId == null ? null : '$recipeId.$parentId',
-        'card_id': node.card.id,
-        'sort_order': order,
-        'grammar_case': node.caseFromParent.index,
-        'join_text': node.joinWithPrevious,
-        'value': node.value,
-        'upper_value': node.upperValue,
-        'numeric_unit': node.unit?.index,
-        'text_value': _storedText(node.text),
-      });
-      for (final child in node.children.indexed) {
-        addNode(child.$2, node.id, child.$1);
-      }
-    }
-
-    for (final step in steps.indexed) {
-      addNode(step.$2, null, step.$1);
-    }
+    _addNodeTree(batch, recipeId, steps);
     await batch.commit(noResult: true);
     await _recordRecipeChanged(recipeId, database);
     _recipeNotes[recipeId] = note;
@@ -782,6 +631,33 @@ class RecipeDatabase {
         : value.substring(0, freeTextMaxLength);
   }
 
+  /// Сериализует дерево модулей одинаково для пользовательского сохранения,
+  /// первого заполнения БД и обновления встроенного каталога.
+  void _addNodeTree(Batch batch, String recipeId, Iterable<RecipeNode> roots) {
+    void addNode(RecipeNode node, String? parentId, int order) {
+      batch.insert('node', {
+        'id': '$recipeId.${node.id}',
+        'root_id': recipeId,
+        'parent_id': parentId == null ? null : '$recipeId.$parentId',
+        'card_id': node.card.id,
+        'sort_order': order,
+        'grammar_case': node.caseFromParent.index,
+        'join_text': node.joinWithPrevious,
+        'value': node.value,
+        'upper_value': node.upperValue,
+        'numeric_unit': node.unit?.index,
+        'text_value': _storedText(node.text),
+      });
+      for (final child in node.children.indexed) {
+        addNode(child.$2, node.id, child.$1);
+      }
+    }
+
+    for (final root in roots.indexed) {
+      addNode(root.$2, null, root.$1);
+    }
+  }
+
   Future<void> _seedCatalog(Database database) async {
     final batch = database.batch();
     for (final card in CatalogCards.all) {
@@ -804,28 +680,7 @@ class RecipeDatabase {
         'category': recipe.category.storageKey,
         'fasting': recipe.fasting.storageKey,
       });
-      void addNode(RecipeNode node, String? parentId, int order) {
-        batch.insert('node', {
-          'id': '${recipe.id}.${node.id}',
-          'root_id': recipe.id,
-          'parent_id': parentId == null ? null : '${recipe.id}.$parentId',
-          'card_id': node.card.id,
-          'sort_order': order,
-          'grammar_case': node.caseFromParent.index,
-          'join_text': node.joinWithPrevious,
-          'value': node.value,
-          'upper_value': node.upperValue,
-          'numeric_unit': node.unit?.index,
-          'text_value': _storedText(node.text),
-        });
-        for (final child in node.children.indexed) {
-          addNode(child.$2, node.id, child.$1);
-        }
-      }
-
-      for (final step in recipe.buildSteps().indexed) {
-        addNode(step.$2, null, step.$1);
-      }
+      _addNodeTree(batch, recipe.id, recipe.buildSteps());
     }
     await batch.commit(noResult: true);
   }
@@ -928,28 +783,7 @@ class RecipeDatabase {
         'last_open_day': usage?['last_open_day'] ?? 0,
         'last_change_day': usage?['last_change_day'] ?? 0,
       });
-      void addNode(RecipeNode node, String? parentId, int order) {
-        batch.insert('node', {
-          'id': '${recipe.id}.${node.id}',
-          'root_id': recipe.id,
-          'parent_id': parentId == null ? null : '${recipe.id}.$parentId',
-          'card_id': node.card.id,
-          'sort_order': order,
-          'grammar_case': node.caseFromParent.index,
-          'join_text': node.joinWithPrevious,
-          'value': node.value,
-          'upper_value': node.upperValue,
-          'numeric_unit': node.unit?.index,
-          'text_value': _storedText(node.text),
-        });
-        for (final child in node.children.indexed) {
-          addNode(child.$2, node.id, child.$1);
-        }
-      }
-
-      for (final step in recipe.buildSteps().indexed) {
-        addNode(step.$2, null, step.$1);
-      }
+      _addNodeTree(batch, recipe.id, recipe.buildSteps());
     }
     await batch.commit(noResult: true);
   }

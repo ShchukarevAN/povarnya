@@ -4,10 +4,10 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
+import '../app_version.dart';
 import 'update_config.dart';
 
 enum UpdateStage {
@@ -358,8 +358,7 @@ class UpdateService {
 
   Future<String> _installedVersion() async {
     try {
-      final info = await PackageInfo.fromPlatform();
-      return info.version;
+      return await appVersion;
     } catch (error) {
       throw UpdateFailure(
         code: 'INSTALLED_VERSION_UNAVAILABLE',

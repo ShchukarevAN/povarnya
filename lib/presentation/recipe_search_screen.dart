@@ -77,13 +77,12 @@ class RecipeSearchScreen extends StatefulWidget {
 }
 
 class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
-  static final _ingredients =
-      CatalogCards.all
-          .where((card) => card.kind == CardKind.ingredient)
-          .map((card) => card.nominative)
-          .toSet()
-          .toList()
-        ..sort();
+  static final _ingredientCardsByName = <String, CardDefinition>{
+    for (final card in CatalogCards.all)
+      if (card.kind == CardKind.ingredient) card.nominative: card,
+  };
+  static final _ingredientCards = _ingredientCardsByName.values.toList()
+    ..sort((left, right) => left.nominative.compareTo(right.nominative));
 
   final Set<String> _selectedIngredients = {};
   final Set<String> _excludedIngredients = {};
@@ -182,9 +181,6 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
       _excludedIngredients.isNotEmpty ||
       _fastingFilter != null;
 
-  List<CatalogRecipe> _recipesInCategory(RecipeCategory category) =>
-      _results.where((recipe) => _categoryOf(recipe) == category).toList();
-
   void _toggleResultOrder() {
     setState(() {
       _randomOrder = !_randomOrder;
@@ -257,191 +253,203 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
-      actions: [
-        IconButton(
-          onPressed: widget.onToggleTheme,
-          icon: const Icon(Icons.brightness_6),
-          tooltip: 'Тема: ${widget.themeLabel}. Сменить тему',
-        ),
-        Builder(
-          builder: (buttonContext) => IconButton(
-            onPressed: () => showSettingsPopover(buttonContext),
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Настройки',
+  Widget build(BuildContext context) {
+    final results = _results;
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+        actions: [
+          IconButton(
+            onPressed: widget.onToggleTheme,
+            icon: const Icon(Icons.brightness_6),
+            tooltip: 'Тема: ${widget.themeLabel}. Сменить тему',
           ),
-        ),
-      ],
-    ),
-    floatingActionButton: FloatingActionButton.extended(
-      onPressed: widget.onCreateRecipe,
-      icon: const Icon(Icons.add),
-      label: const Text('Создать рецепт'),
-    ),
-    body: LayoutBuilder(
-      builder: (context, constraints) {
-        final panelWidth = constraints.maxWidth.clamp(0.0, 360.0).toDouble();
-        final isOpen = _filterReveal >= .5;
-        // В портретной/узкой раскладке важнее показать больше результатов и
-        // фильтров, чем сохранять настольные вертикальные интервалы.
-        final compactVertical = constraints.maxWidth < 1000;
-        return GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onHorizontalDragStart: compactVertical
-              ? (details) => _startEdgeFilterDrag(
-                  details,
-                  constraints.maxWidth,
-                  panelWidth,
-                )
-              : null,
-          onHorizontalDragUpdate: compactVertical
-              ? (details) => _updateEdgeFilterDrag(details, panelWidth)
-              : null,
-          onHorizontalDragEnd: compactVertical
-              ? (_) => _finishEdgeFilterDrag()
-              : null,
-          onHorizontalDragCancel: compactVertical
-              ? _finishEdgeFilterDrag
-              : null,
-          child: Stack(
-            children: [
-              ListView(
-                padding: EdgeInsets.all(compactVertical ? 8 : 24),
-                children: [
-                  Text(
-                    'Поиск рецептов',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  SizedBox(height: compactVertical ? 8 : 24),
-                  TextField(
-                    onChanged: (value) => setState(() => _titleQuery = value),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Theme.of(context).colorScheme.primaryContainer,
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      labelText: 'Название рецепта',
-                      labelStyle: TextStyle(
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                      ),
-                      suffixIcon: IconButton(
-                        key: const ValueKey('recipe-order-toggle'),
-                        constraints: Theme.of(context)
-                            .inputDecorationTheme
-                            .suffixIconConstraints,
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                        tooltip: _randomOrder
-                            ? 'Случайный порядок: включён'
-                            : 'Алфавитный порядок: включён',
-                        onPressed: _toggleResultOrder,
-                        icon: _randomOrder
-                            ? Icon(
-                                Icons.shuffle,
-                                color: Theme.of(context).colorScheme.primary,
-                              )
-                            : Text(
-                                'А→Я',
-                                style: Theme.of(context).textTheme.labelLarge
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: compactVertical ? 5 : 10),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      for (final fasting in RecipeFasting.values)
-                        FilterChip(
-                          avatar: Icon(
-                            fasting == RecipeFasting.lean
-                                ? Icons.eco_outlined
-                                : Icons.restaurant_outlined,
-                            size: 18,
+          Builder(
+            builder: (buttonContext) => IconButton(
+              onPressed: () => showSettingsPopover(buttonContext),
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Настройки',
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: widget.onCreateRecipe,
+        icon: const Icon(Icons.add),
+        label: const Text('Создать рецепт'),
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final panelWidth = constraints.maxWidth.clamp(0.0, 360.0).toDouble();
+          final isOpen = _filterReveal >= .5;
+          // В портретной/узкой раскладке важнее показать больше результатов и
+          // фильтров, чем сохранять настольные вертикальные интервалы.
+          final compactVertical = constraints.maxWidth < 1000;
+          return GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragStart: compactVertical
+                ? (details) => _startEdgeFilterDrag(
+                    details,
+                    constraints.maxWidth,
+                    panelWidth,
+                  )
+                : null,
+            onHorizontalDragUpdate: compactVertical
+                ? (details) => _updateEdgeFilterDrag(details, panelWidth)
+                : null,
+            onHorizontalDragEnd: compactVertical
+                ? (_) => _finishEdgeFilterDrag()
+                : null,
+            onHorizontalDragCancel: compactVertical
+                ? _finishEdgeFilterDrag
+                : null,
+            child: Stack(
+              children: [
+                ListView(
+                  padding: EdgeInsets.all(compactVertical ? 8 : 24),
+                  children: [
+                    Text(
+                      'Поиск рецептов',
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w700,
                           ),
-                          label: Text(fasting.title),
-                          selected: _fastingFilter == fasting,
-                          onSelected: (selected) => setState(() {
-                            _fastingFilter = selected ? fasting : null;
-                          }),
+                    ),
+                    SizedBox(height: compactVertical ? 8 : 24),
+                    TextField(
+                      onChanged: (value) => setState(() => _titleQuery = value),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer,
+                        prefixIcon: Icon(
+                          Icons.search,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
+                        labelText: 'Название рецепта',
+                        labelStyle: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onPrimaryContainer,
+                        ),
+                        suffixIcon: IconButton(
+                          key: const ValueKey('recipe-order-toggle'),
+                          constraints: Theme.of(context)
+                              .inputDecorationTheme
+                              .suffixIconConstraints,
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          tooltip: _randomOrder
+                              ? 'Случайный порядок: включён'
+                              : 'Алфавитный порядок: включён',
+                          onPressed: _toggleResultOrder,
+                          icon: _randomOrder
+                              ? Icon(
+                                  Icons.shuffle,
+                                  color: Theme.of(context).colorScheme.primary,
+                                )
+                              : Text(
+                                  'А→Я',
+                                  style: Theme.of(context).textTheme.labelLarge
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: compactVertical ? 5 : 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        for (final fasting in RecipeFasting.values)
+                          FilterChip(
+                            avatar: Icon(
+                              fasting == RecipeFasting.lean
+                                  ? Icons.eco_outlined
+                                  : Icons.restaurant_outlined,
+                              size: 18,
+                            ),
+                            label: Text(fasting.title),
+                            selected: _fastingFilter == fasting,
+                            onSelected: (selected) => setState(() {
+                              _fastingFilter = selected ? fasting : null;
+                            }),
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: compactVertical ? 8 : 28),
+                    if (_hasSearchConditions) ...[
+                      _ResultCount(count: results.length),
+                      SizedBox(height: compactVertical ? 4 : 12),
+                      ..._recipeCards(results, compactVertical),
+                    ] else ...[
+                      ..._categorySections(compactVertical, results),
                     ],
-                  ),
-                  SizedBox(height: compactVertical ? 8 : 28),
-                  if (_hasSearchConditions) ...[
-                    _ResultCount(count: _results.length),
-                    SizedBox(height: compactVertical ? 4 : 12),
-                    ..._recipeCards(_results, compactVertical),
-                  ] else ...[
-                    ..._categorySections(compactVertical),
-                  ],
-                  if (_hasSearchConditions && _results.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Center(
-                        child: Text(
-                          'Рецепты по этому сочетанию не найдены.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.outline,
+                    if (_hasSearchConditions && results.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: Text(
+                            'Рецепты по этому сочетанию не найдены.',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              ),
-              filterPanelSlide(
-                isDragging: _isFilterDragging,
-                right: -panelWidth * (1 - _filterReveal),
-                width: panelWidth,
-                child: Material(
-                  elevation: 12,
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: _filterPanel(compactVertical: compactVertical),
+                  ],
                 ),
-              ),
-              filterPanelSlide(
-                isDragging: _isFilterDragging,
-                right: panelWidth * _filterReveal,
-                width: 48,
-                // Ручка не должна растягиваться на ширину самой панели.
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _toggleFilters,
-                      onHorizontalDragStart: (_) => _startFilterDrag(),
-                      onHorizontalDragUpdate: (details) =>
-                          _dragFilters(details.delta.dx, panelWidth),
-                      onHorizontalDragEnd: (_) => _finishFilterDrag(),
-                      onHorizontalDragCancel: _finishFilterDrag,
-                      child: Tooltip(
-                        message: isOpen ? 'Скрыть фильтры' : 'Открыть фильтры',
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 16),
-                          child: SizedBox(
-                            width: 48,
-                            height: 48,
-                            child: Center(
-                              child: Icon(
-                                isOpen
-                                    ? Icons.chevron_right
-                                    : Icons.chevron_left,
+                filterPanelSlide(
+                  isDragging: _isFilterDragging,
+                  right: -panelWidth * (1 - _filterReveal),
+                  width: panelWidth,
+                  child: Material(
+                    elevation: 12,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    child: _filterPanel(compactVertical: compactVertical),
+                  ),
+                ),
+                filterPanelSlide(
+                  isDragging: _isFilterDragging,
+                  right: panelWidth * _filterReveal,
+                  width: 48,
+                  // Ручка не должна растягиваться на ширину самой панели.
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _toggleFilters,
+                        onHorizontalDragStart: (_) => _startFilterDrag(),
+                        onHorizontalDragUpdate: (details) =>
+                            _dragFilters(details.delta.dx, panelWidth),
+                        onHorizontalDragEnd: (_) => _finishFilterDrag(),
+                        onHorizontalDragCancel: _finishFilterDrag,
+                        child: Tooltip(
+                          message: isOpen
+                              ? 'Скрыть фильтры'
+                              : 'Открыть фильтры',
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Center(
+                                child: Icon(
+                                  isOpen
+                                      ? Icons.chevron_right
+                                      : Icons.chevron_left,
+                                ),
                               ),
                             ),
                           ),
@@ -450,13 +458,13 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   Widget _filterPanel({required bool compactVertical}) => SafeArea(
     child: ListView(
@@ -513,9 +521,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     final included = _selectedIngredients.contains(ingredient);
     final excluded = _excludedIngredients.contains(ingredient);
     final colors = Theme.of(context).colorScheme;
-    final card = CatalogCards.all.firstWhere(
-      (candidate) => candidate.nominative == ingredient,
-    );
+    final card = _ingredientCardsByName[ingredient]!;
     final chip = _HatchedIngredientFilter(
       // Штриховка описывает следующий щелчок: нейтральный фильтр будет
       // включён, включённый — исключён, исключённый — снят.
@@ -597,10 +603,19 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
       ),
   ];
 
-  List<Widget> _categorySections(bool compactVertical) {
+  List<Widget> _categorySections(
+    bool compactVertical,
+    List<CatalogRecipe> results,
+  ) {
+    final recipesByCategory = <RecipeCategory, List<CatalogRecipe>>{
+      for (final category in RecipeCategory.values) category: [],
+    };
+    for (final recipe in results) {
+      recipesByCategory[_categoryOf(recipe)]!.add(recipe);
+    }
     final sections = <Widget>[];
     for (final category in RecipeCategory.values) {
-      final recipes = _recipesInCategory(category);
+      final recipes = recipesByCategory[category]!;
       if (recipes.isEmpty) continue;
       final expanded = _expandedCategories.contains(category);
       final colors = Theme.of(context).colorScheme;
@@ -663,17 +678,15 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     final groups = <String, List<String>>{
       for (final name in groupOrder) name: [],
     };
-    // Тот же универсальный механизм, который сортирует результаты рецептов
-    // и карточки песочницы: подстрока без учёта регистра + алфавитный порядок.
-    for (final ingredient in searchAndSortByLabel(
-      _ingredients,
-      query: _filterQuery,
-      labelOf: (ingredient) => ingredient,
-    )) {
-      final card = CatalogCards.all.firstWhere(
-        (card) => card.nominative == ingredient,
-      );
-      groups[CatalogCards.ingredientGroup(card).title]!.add(ingredient);
+    // Карточки уже сгруппированы и отсортированы один раз; при вводе остаётся
+    // только линейная проверка подстроки без повторных поисков по каталогу.
+    final normalizedQuery = _filterQuery.trim().toLowerCase();
+    for (final card in _ingredientCards) {
+      if (normalizedQuery.isNotEmpty &&
+          !card.nominative.toLowerCase().contains(normalizedQuery)) {
+        continue;
+      }
+      groups[CatalogCards.ingredientGroup(card).title]!.add(card.nominative);
     }
     return Map.fromEntries(
       groupOrder

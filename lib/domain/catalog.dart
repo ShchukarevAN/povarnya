@@ -136,22 +136,42 @@ enum IngredientGroup {
 
 /// Предустановленный локальный каталог, составленный из обсуждённых рецептов.
 class CatalogRecipe {
-  const CatalogRecipe({
+  CatalogRecipe({
     required this.id,
     required this.title,
-    required this.ingredients,
     required this.buildSteps,
     this.servings = 2,
     this.detailedSteps = const [],
   });
   final String id;
   final String title;
-  final Set<String> ingredients;
   final List<RecipeNode> Function() buildSteps;
 
   /// Исходное число порций и начальное значение множителя рецепта.
   final int servings;
   final List<String> detailedSteps;
+
+  /// Состав всегда выводится из модульного дерева. Благодаря единому источнику
+  /// названия в поиске не могут разойтись с карточками самого рецепта.
+  late final Set<String> ingredients = _collectIngredients();
+
+  Set<String> _collectIngredients() {
+    final result = <String>{};
+
+    void visit(RecipeNode node) {
+      if (node.card.kind == CardKind.ingredient) {
+        result.add(node.card.nominative);
+      }
+      for (final child in node.children) {
+        visit(child);
+      }
+    }
+
+    for (final step in buildSteps()) {
+      visit(step);
+    }
+    return Set.unmodifiable(result);
+  }
 
   RecipeCategory get category =>
       _catalogRecipeCategories[id] ?? RecipeCategory.other;
@@ -159,7 +179,8 @@ class CatalogRecipe {
   /// Признак рассчитывается по составу встроенного рецепта. Это даёт
   /// однозначное начальное значение без дублирования ещё одного большого
   /// списка идентификаторов. Пользовательский выбор хранится в БД отдельно.
-  RecipeFasting get fasting => _nonLeanIngredientLabels.any(ingredients.contains)
+  RecipeFasting get fasting =>
+      _nonLeanIngredientLabels.any(ingredients.contains)
       ? RecipeFasting.nonLean
       : RecipeFasting.lean;
 
@@ -170,7 +191,9 @@ class CatalogRecipe {
   /// названием блюда. При равных количествах сохраняется порядок первого
   /// использования в шагах; не встретившиеся в дереве названия идут в конце по
   /// алфавиту.
-  List<String> get ingredientsByAmount {
+  late final List<String> ingredientsByAmount = _ingredientsByAmount();
+
+  List<String> _ingredientsByAmount() {
     final amounts = <String, int>{};
     final firstAppearance = <String, int>{};
     var appearanceIndex = 0;
@@ -211,7 +234,7 @@ class CatalogRecipe {
       if (appearanceComparison != 0) return appearanceComparison;
       return left.compareTo(right);
     });
-    return labels;
+    return List.unmodifiable(labels);
   }
 
   int _ingredientAmount(RecipeNode ingredient) {
@@ -1766,6 +1789,7 @@ RecipeNode _ingredient(
   id: id,
   card: card,
   caseFromParent: GrammarCase.accusative,
+  text: card.id == 'ingredient.eggs' ? 'С2' : null,
   children: children,
 );
 
@@ -1813,8 +1837,8 @@ RecipeNode _time(String id, int minutes, [int? upperMinutes]) => RecipeNode(
 /// модуля программы, а не отдельной карточкой; длительность — вложение шага.
 RecipeNode _multicookerStep(
   String id,
-  String mode,
-  int minutes, [
+  String mode, [
+  int? minutes,
   int? upperMinutes,
 ]) => _node(id, CatalogCards.prepare, [
   RecipeNode(
@@ -1823,7 +1847,7 @@ RecipeNode _multicookerStep(
     caseFromParent: GrammarCase.accusative,
     children: [_multicookerProgram('$id-program', mode)],
   ),
-  _time('$id-time', minutes, upperMinutes),
+  if (minutes != null) _time('$id-time', minutes, upperMinutes),
 ]);
 
 /// Одна из двух одинаковых партий яичной запеканки: объём чаши 5 л не
@@ -1892,15 +1916,7 @@ List<RecipeNode> _eggCasseroleBatch(String id) => [
   _node('$id-3', CatalogCards.grease, [
     _ingredient('$id-3-oil', CatalogCards.vegetableOil),
   ]),
-  _node('$id-4', CatalogCards.select, [
-    _multicookerProgram('$id-4-mode', 'Выпечка'),
-    RecipeNode(
-      id: '$id-4-time',
-      card: CatalogCards.time,
-      value: 55,
-      unit: NumericUnit.minutes,
-    ),
-  ]),
+  _multicookerStep('$id-4', 'Выпечка', 55),
   _node('$id-5', CatalogCards.leave, [
     _ingredient('$id-5-casserole', CatalogCards.eggs),
     RecipeNode(
@@ -1916,17 +1932,6 @@ List<RecipeNode> _eggCasseroleBatch(String id) => [
 final _traditionalMushroomSoup = CatalogRecipe(
   id: 'traditional-mushroom-soup',
   title: 'Грибной суп',
-  ingredients: {
-    'Грибы',
-    'Картошка',
-    'Морковь',
-    'Лук репчатый',
-    'Растительное масло',
-    'Сливочное масло',
-    'Вода',
-    'Соль',
-    'Чёрный молотый перец',
-  },
   detailedSteps: [
     'Нарезать 100 г лука, 500 г грибов, 400 г картофеля и 100 г моркови.',
     'Обжарить лук на 70 мл растительного и 40 г сливочного масла до прозрачности.',
@@ -2003,7 +2008,6 @@ final _traditionalMushroomSoup = CatalogRecipe(
 final _traditionalMilkNoodleSoup = CatalogRecipe(
   id: 'traditional-milk-noodle-soup',
   title: 'Молочный суп с лапшой',
-  ingredients: {'Вода', 'Лапша', 'Молоко', 'Соль', 'Сахар', 'Сливочное масло'},
   detailedSteps: [
     'Влить 500 мл воды и довести до кипения.',
     'Добавить 150 г лапши и варить 3–5 минут.',
@@ -2061,15 +2065,6 @@ final _traditionalMilkNoodleSoup = CatalogRecipe(
 final _traditionalBuckwheatMushrooms = CatalogRecipe(
   id: 'traditional-buckwheat-mushrooms',
   title: 'Гречневая каша с грибами',
-  ingredients: {
-    'Гречка',
-    'Грибы',
-    'Лук репчатый',
-    'Морковь',
-    'Растительное масло',
-    'Вода',
-    'Соль',
-  },
   detailedSteps: [
     'Нарезать 80 г лука и 500 г грибов, натереть 100 г моркови.',
     'Обжарить лук и морковь на 50 мл растительного масла.',
@@ -2152,14 +2147,9 @@ CatalogRecipe _porridgeRecipe({
   int finalBoilMinutes = 0,
   int restMinutes = 0,
 }) {
-  final ingredients = <String>{grain.nominative, 'Вода', 'Соль'};
-  if (milkVolume != null) ingredients.add('Молоко');
-  if (butterMass != null) ingredients.add('Сливочное масло');
-  if (sugarMass > 0) ingredients.add('Сахар');
   return CatalogRecipe(
     id: id,
     title: title,
-    ingredients: ingredients,
     buildSteps: () => [
       if (soakMinutes != null)
         _node('$id-1', CatalogCards.soak, [
@@ -2248,14 +2238,6 @@ CatalogRecipe _porridgeRecipe({
 final _traditionalOatmeal = CatalogRecipe(
   id: 'traditional-oatmeal',
   title: 'Каша овсяная',
-  ingredients: {
-    'Овсяные хлопья',
-    'Молоко',
-    'Вода',
-    'Сахар',
-    'Соль',
-    'Сливочное масло',
-  },
   buildSteps: () => [
     _node('oatmeal-1', CatalogCards.pour, [
       _ingredient('oatmeal-1-milk', CatalogCards.milk, [
@@ -2337,7 +2319,6 @@ final _traditionalPorridges = <CatalogRecipe>[
 final _traditionalSemolinaPorridge = CatalogRecipe(
   id: 'traditional-semolina-porridge',
   title: 'Манная каша',
-  ingredients: {'Манная крупа', 'Молоко', 'Сахар', 'Соль', 'Сливочное масло'},
   detailedSteps: [
     'Смешать 500 мл холодного молока и 45 г манной крупы венчиком.',
     'Нагревать смесь, постоянно перемешивая, до начала тихого кипения.',
@@ -2384,14 +2365,6 @@ final _traditionalSemolinaPorridge = CatalogRecipe(
 final _traditionalSyrniki = CatalogRecipe(
   id: 'traditional-syrniki',
   title: 'Сырники',
-  ingredients: {
-    'Творог',
-    'Яйца',
-    'Мука',
-    'Сахар',
-    'Соль',
-    'Растительное масло',
-  },
   detailedSteps: [
     'Смешать 400 г творога, 1 яйцо, 40 г сахара, 35 г муки и соль.',
     'Сформировать сырники и обвалять их в оставшейся муке.',
@@ -2445,15 +2418,6 @@ final _traditionalSyrniki = CatalogRecipe(
 final _traditionalYeastPancakes = CatalogRecipe(
   id: 'traditional-yeast-pancakes',
   title: 'Блины дрожжевые',
-  ingredients: {
-    'Мука',
-    'Молоко',
-    'Яйца',
-    'Дрожжи сухие',
-    'Сахар',
-    'Соль',
-    'Сливочное масло',
-  },
   detailedSteps: [
     'Подогреть 500 мл молока.',
     'Смешать 250 г муки, 10 г сухих дрожжей, сахар, соль и молоко.',
@@ -2522,7 +2486,6 @@ final _traditionalYeastPancakes = CatalogRecipe(
 final _traditionalCocoa = CatalogRecipe(
   id: 'traditional-cocoa-milk',
   title: 'Какао на молоке',
-  ingredients: {'Молоко', 'Какао', 'Сахар', 'Вода'},
   detailedSteps: [
     'Смешать 25 г какао, 30 г сахара и 40 мл воды.',
     'Подогреть 500 мл молока.',
@@ -2563,17 +2526,6 @@ final _traditionalCocoa = CatalogRecipe(
 final _traditionalSquashCaviar = CatalogRecipe(
   id: 'traditional-squash-caviar',
   title: 'Икра кабачковая',
-  ingredients: {
-    'Кабачки',
-    'Морковь',
-    'Лук репчатый',
-    'Растительное масло',
-    'Томатная паста',
-    'Уксус',
-    'Соль',
-    'Сахар',
-    'Чеснок',
-  },
   detailedSteps: [
     'Нарезать 1 кг кабачков, 230 г моркови и 200 г лука.',
     'Обжарить лук, морковь и кабачки по отдельности, используя до 100 мл масла.',
@@ -2666,7 +2618,6 @@ final _traditionalSquashCaviar = CatalogRecipe(
 final _traditionalRaspberryJam = CatalogRecipe(
   id: 'traditional-raspberry-jam',
   title: 'Варенье малиновое',
-  ingredients: {'Малина', 'Сахар'},
   detailedSteps: [
     'Смешать 1 кг малины и 700 г сахара.',
     'Оставить на 24 часа.',
@@ -2698,7 +2649,6 @@ final _traditionalRaspberryJam = CatalogRecipe(
 final _traditionalPearlBarley = CatalogRecipe(
   id: 'traditional-pearl-barley',
   title: 'Каша перловая',
-  ingredients: {'Перловая крупа', 'Вода', 'Соль', 'Сливочное масло'},
   detailedSteps: [
     'Замочить 230 г перловой крупы на 10 минут, затем промыть.',
     'Добавить 500 мл воды и соль.',
@@ -2707,13 +2657,6 @@ final _traditionalPearlBarley = CatalogRecipe(
     'Добавить 50 г сливочного масла и перемешать.',
   ],
   buildSteps: () => [
-    _node('pearl-barley-0', CatalogCards.prepare, [
-      RecipeNode(
-        id: 'pearl-barley-0-device',
-        card: CatalogCards.multicooker,
-        caseFromParent: GrammarCase.accusative,
-      ),
-    ]),
     _node('pearl-barley-1', CatalogCards.soak, [
       _ingredient('pearl-barley-1-grain', CatalogCards.pearlBarley, [
         _mass('pearl-barley-1-grain-mass', 230),
@@ -2734,10 +2677,7 @@ final _traditionalPearlBarley = CatalogRecipe(
       ]),
       _ingredient('pearl-barley-4-salt', CatalogCards.salt),
     ]),
-    _node('pearl-barley-5', CatalogCards.select, [
-      _multicookerProgram('pearl-barley-5-program', 'Молочная каша'),
-      _time('pearl-barley-5-time', 40),
-    ]),
+    _multicookerStep('pearl-barley-5', 'Молочная каша', 40),
     _node('pearl-barley-6', CatalogCards.leave, [
       _ingredient('pearl-barley-6-grain', CatalogCards.pearlBarley),
       _time('pearl-barley-6-time', 10, 15),
@@ -2758,16 +2698,6 @@ final _traditionalPearlBarley = CatalogRecipe(
 final _traditionalCottageCheeseCasserole = CatalogRecipe(
   id: 'traditional-cottage-cheese-casserole',
   title: 'Творожная запеканка классическая',
-  ingredients: {
-    'Творог',
-    'Яйца',
-    'Манная крупа',
-    'Сахар',
-    'Сливочное масло',
-    'Ваниль',
-    'Изюм',
-    'Соль',
-  },
   detailedSteps: [
     'Смешать 500 г творога, 3 яйца, 45 г манной крупы, 100 г сахара, 50 г масла, 1 г ванили, 50 г изюма и 3 г соли.',
     'Смазать форму маслом и выложить массу.',
@@ -2845,7 +2775,6 @@ final _traditionalCottageCheeseCasserole = CatalogRecipe(
 final _traditionalBakedBeet = CatalogRecipe(
   id: 'traditional-baked-beet',
   title: 'Печёная свёкла',
-  ingredients: {'Свёкла'},
   detailedSteps: [
     'Разогреть духовку до 180 °C.',
     'Выложить свёклу на противень.',
@@ -2880,18 +2809,6 @@ final _traditionalBakedBeet = CatalogRecipe(
 final _traditionalCapitalSalad = CatalogRecipe(
   id: 'traditional-capital-salad',
   title: 'Салат «Столичный» с курицей',
-  ingredients: {
-    'Куриное филе',
-    'Картошка',
-    'Морковь',
-    'Яйца',
-    'Солёные огурцы',
-    'Зелёный горошек',
-    'Майонез',
-    'Укроп',
-    'Соль',
-    'Чёрный перец',
-  },
   detailedSteps: [
     'Отварить 350 г куриного филе 20 минут до готовности.',
     'Отварить 400 г картофеля и 150 г моркови 25 минут до мягкости.',
@@ -2974,18 +2891,6 @@ final _traditionalCapitalSalad = CatalogRecipe(
 final _traditionalSovietGoulash = CatalogRecipe(
   id: 'traditional-soviet-goulash',
   title: 'Гуляш из говядины по-советски',
-  ingredients: {
-    'Говядина',
-    'Лук репчатый',
-    'Растительное масло',
-    'Мука',
-    'Вода',
-    'Томатная паста',
-    'Сахар',
-    'Соль',
-    'Чёрный перец',
-    'Лавровый лист',
-  },
   detailedSteps: [
     'Нарезать 800 г говядины и 2 луковицы.',
     'Обжарить 60 г муки на сухой поверхности до кремового цвета.',
@@ -3091,24 +2996,6 @@ final _traditionalSovietGoulash = CatalogRecipe(
 final _lazyCabbageRolls = CatalogRecipe(
   id: 'lazy-cabbage-rolls-multicooker',
   title: 'Ленивые голубцы в томатно-сметанном соусе',
-  ingredients: {
-    'Капуста',
-    'Фарш',
-    'Рис',
-    'Лук репчатый',
-    'Морковь',
-    'Яйца',
-    'Чеснок',
-    'Соль',
-    'Чёрный молотый перец',
-    'Паприка сладкая',
-    'Растительное масло',
-    'Томатная паста',
-    'Сметана',
-    'Сахар',
-    'Лавровый лист',
-    'Вода',
-  },
   servings: 8,
   detailedSteps: [
     'Нашинковать 750 г капусты, ошпарить и откинуть на дуршлаг.',
@@ -3262,7 +3149,6 @@ final _lazyCabbageRolls = CatalogRecipe(
 final _homemadeCreamIceCream = CatalogRecipe(
   id: 'homemade-cream-ice-cream',
   title: 'Домашнее сливочное мороженое',
-  ingredients: {'Сливки', 'Молоко сгущённое'},
   servings: 6,
   detailedSteps: [
     'Охладить 500 мл сливок жирностью 33–35 % и миску.',
@@ -3319,7 +3205,6 @@ final _homemadeCreamIceCream = CatalogRecipe(
 final _homemadeChocolateIceCream = CatalogRecipe(
   id: 'homemade-chocolate-ice-cream',
   title: 'Шоколадное мороженое',
-  ingredients: {'Сливки', 'Молоко сгущённое', 'Шоколад', 'Какао', 'Ваниль'},
   servings: 4,
   detailedSteps: [
     'Подогреть 100 мл сливок, не доводя до кипения.',
@@ -3391,7 +3276,6 @@ final _homemadeChocolateIceCream = CatalogRecipe(
 final _homemadeBananaIceCream = CatalogRecipe(
   id: 'homemade-banana-ice-cream',
   title: 'Банановое мороженое',
-  ingredients: {'Банан', 'Сливки', 'Молоко сгущённое'},
   servings: 3,
   detailedSteps: [
     'Очистить 3 банана, нарезать кусочками и заморозить на 1–2 часа.',
@@ -3440,7 +3324,6 @@ final _homemadeBananaIceCream = CatalogRecipe(
 final _homemadeCremeBruleeIceCream = CatalogRecipe(
   id: 'homemade-creme-brulee-ice-cream',
   title: 'Мороженое крем-брюле',
-  ingredients: {'Сливки', 'Молоко', 'Варёное сгущённое молоко'},
   servings: 6,
   detailedSteps: [
     'Смешать 200 г варёного сгущённого молока и 200 мл молока; оставить на 30 минут.',
@@ -3561,18 +3444,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'okroshka-ham',
     title: 'Окрошка с ветчиной',
     servings: 6,
-    ingredients: {
-      'Ветчина',
-      'Картошка',
-      'Огурец',
-      'Редис',
-      'Яйца',
-      'Квас',
-      'Сметана',
-      'Зелёный лук',
-      'Укроп',
-      'Соль',
-    },
     buildSteps: () => [
       _moduleStep('okroshka', 1, CatalogCards.boil, [
         (card: CatalogCards.potato, grams: 500),
@@ -3600,15 +3471,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'mannik-kefir',
     title: 'Манник на кефире',
     servings: 8,
-    ingredients: {
-      'Манная крупа',
-      'Кефир',
-      'Яйца',
-      'Сахар',
-      'Мука',
-      'Разрыхлитель',
-      'Сливочное масло',
-    },
     buildSteps: () => [
       _moduleStep('mannik', 1, CatalogCards.mix, [
         (card: CatalogCards.semolina, grams: 250),
@@ -3638,15 +3500,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'honey-kovrizhka',
     title: 'Коврижка медовая',
     servings: 10,
-    ingredients: {
-      'Мёд',
-      'Мука',
-      'Сахар',
-      'Яйца',
-      'Сливочное масло',
-      'Разрыхлитель',
-      'Корица',
-    },
     buildSteps: () => [
       _moduleStep('kovrizhka', 1, CatalogCards.heat, [
         (card: CatalogCards.honey, grams: 180),
@@ -3677,15 +3530,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'olivier-ham',
     title: 'Оливье с ветчиной',
     servings: 8,
-    ingredients: {
-      'Ветчина',
-      'Картошка',
-      'Морковь',
-      'Солёные огурцы',
-      'Зелёный горошек',
-      'Яйца',
-      'Майонез',
-    },
     buildSteps: () => [
       _moduleStep('olivier', 1, CatalogCards.boil, [
         (card: CatalogCards.potato, grams: 500),
@@ -3713,15 +3557,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'beef-stroganoff',
     title: 'Бефстроганов',
     servings: 6,
-    ingredients: {
-      'Говядина',
-      'Лук репчатый',
-      'Сметана',
-      'Мука',
-      'Сливочное масло',
-      'Соль',
-      'Чёрный молотый перец',
-    },
     buildSteps: () => [
       _moduleStep('stroganoff', 1, CatalogCards.cut, [
         (card: CatalogCards.beef, grams: 700),
@@ -3762,15 +3597,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'herring-under-fur-coat',
     title: 'Селёдка под шубой',
     servings: 8,
-    ingredients: {
-      'Сельдь',
-      'Свёкла',
-      'Картошка',
-      'Морковь',
-      'Лук репчатый',
-      'Яйца',
-      'Майонез',
-    },
     buildSteps: () => [
       _moduleStep('fur', 1, CatalogCards.boil, [
         (card: CatalogCards.beet, grams: 500),
@@ -3798,16 +3624,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'pike-ukha',
     title: 'Уха из щуки',
     servings: 6,
-    ingredients: {
-      'Щука',
-      'Картошка',
-      'Морковь',
-      'Лук репчатый',
-      'Вода',
-      'Лавровый лист',
-      'Соль',
-      'Чёрный молотый перец',
-    },
     buildSteps: () => [
       _moduleStep('ukha', 1, CatalogCards.cut, [
         (card: CatalogCards.pike, grams: 900),
@@ -3841,16 +3657,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'beetroot-soup',
     title: 'Свекольник',
     servings: 6,
-    ingredients: {
-      'Свёкла',
-      'Картошка',
-      'Огурец',
-      'Яйца',
-      'Сметана',
-      'Укроп',
-      'Вода',
-      'Соль',
-    },
     buildSteps: () => [
       _moduleStep('beetroot-soup', 1, CatalogCards.boil, [
         (card: CatalogCards.beet, grams: 500),
@@ -3877,16 +3683,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'classic-roast',
     title: 'Жаркое классическое',
     servings: 6,
-    ingredients: {
-      'Свинина',
-      'Картошка',
-      'Морковь',
-      'Лук репчатый',
-      'Растительное масло',
-      'Вода',
-      'Соль',
-      'Чёрный молотый перец',
-    },
     buildSteps: () => [
       _moduleStep('roast', 1, CatalogCards.cut, [
         (card: CatalogCards.pork, grams: 800),
@@ -3920,18 +3716,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'classic-borscht',
     title: 'Борщ',
     servings: 8,
-    ingredients: {
-      'Свинина',
-      'Свёкла',
-      'Капуста',
-      'Картошка',
-      'Морковь',
-      'Лук репчатый',
-      'Томатная паста',
-      'Чеснок',
-      'Вода',
-      'Соль',
-    },
     buildSteps: () => [
       _moduleStep('borscht', 1, CatalogCards.boil, [
         (card: CatalogCards.pork, grams: 700),
@@ -3966,7 +3750,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'bread-kvass',
     title: 'Квас хлебный',
     servings: 8,
-    ingredients: {'Хлеб', 'Вода', 'Сахар', 'Дрожжи сухие'},
     buildSteps: () => [
       _moduleStep(
         'kvass',
@@ -3997,7 +3780,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'potato-puree',
     title: 'Картофельное пюре',
     servings: 6,
-    ingredients: {'Картошка', 'Молоко', 'Сливочное масло', 'Соль'},
     buildSteps: () => [
       _moduleStep('puree', 1, CatalogCards.cut, [
         (card: CatalogCards.potato, grams: 1200),
@@ -4020,7 +3802,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'apple-plum-compote',
     title: 'Компот из яблок и слив',
     servings: 8,
-    ingredients: {'Яблоки', 'Сливы', 'Вода', 'Сахар'},
     buildSteps: () => [
       _moduleStep('compote', 1, CatalogCards.cut, [
         (card: CatalogCards.apples, grams: 500),
@@ -4051,7 +3832,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'baked-apples-honey',
     title: 'Запечённые яблоки с мёдом',
     servings: 6,
-    ingredients: {'Яблоки', 'Мёд', 'Грецкие орехи', 'Изюм', 'Корица'},
     buildSteps: () => [
       _moduleStep('baked-apples', 1, CatalogCards.cut, [
         (card: CatalogCards.apples, grams: 1200),
@@ -4083,15 +3863,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'vinaigrette',
     title: 'Винегрет',
     servings: 8,
-    ingredients: {
-      'Свёкла',
-      'Картошка',
-      'Морковь',
-      'Солёные огурцы',
-      'Квашеная капуста',
-      'Зелёный горошек',
-      'Растительное масло',
-    },
     buildSteps: () => [
       _moduleStep('vinaigrette', 1, CatalogCards.boil, [
         (card: CatalogCards.beet, grams: 500),
@@ -4119,7 +3890,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'gogol-mogol',
     title: 'Гоголь-моголь',
     servings: 2,
-    ingredients: {'Желток', 'Белок', 'Сахар', 'Молоко', 'Ваниль'},
     buildSteps: () => [
       _moduleStep('gogol', 1, CatalogCards.whisk, [
         (card: CatalogCards.eggYolk, pieces: 3),
@@ -4146,18 +3916,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'buckwheat-cabbage-rolls',
     title: 'Голубцы с гречкой',
     servings: 6,
-    ingredients: {
-      'Капуста',
-      'Фарш',
-      'Гречка',
-      'Лук репчатый',
-      'Морковь',
-      'Томатная паста',
-      'Сметана',
-      'Растительное масло',
-      'Соль',
-      'Чёрный перец',
-    },
     detailedSteps: [
       'Промыть 180 г гречки, залить 350 мл воды и варить 12–15 минут до почти полной готовности. Остудить.',
       'Снять с кочана капусты 12–14 крупных листьев. Опустить их в кипящую воду на 4–5 минут, затем обсушить.',
@@ -4251,16 +4009,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'mimosa-pink-salmon',
     title: 'Салат «Мимоза» с горбушей',
     servings: 6,
-    ingredients: {
-      'Консерва',
-      'Горбуша',
-      'Картошка',
-      'Морковь',
-      'Яйца',
-      'Лук репчатый',
-      'Сыр твёрдый',
-      'Майонез',
-    },
     detailedSteps: [
       'Отварить 350 г картошки, 250 г моркови и 5 яиц до готовности, затем остудить.',
       'Открыть банку горбуши в собственном соку (240 г) и размять рыбу вилкой.',
@@ -4321,7 +4069,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'cranberry-kissel',
     title: 'Кисель из клюквы',
     servings: 6,
-    ingredients: {'Клюква', 'Вода', 'Сахар', 'Картофельный крахмал'},
     detailedSteps: [
       'Промыть и измельчить 300 г клюквы, затем процедить ягодную массу через сито.',
       'Залить жмых 1 200 мл воды, довести до кипения и варить 10–15 минут; процедить отвар.',
@@ -4367,7 +4114,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'apple-pastila',
     title: 'Белёвская яблочная пастила',
     servings: 8,
-    ingredients: {'Яблоки', 'Белок', 'Сахар'},
     detailedSteps: [
       'Промыть 2 000 г кислых яблок, очистить их от кожуры и сердцевин.',
       'Запечь яблоки при 180 °C 20–25 минут до мягкости, затем измельчить в однородное пюре.',
@@ -4427,7 +4173,6 @@ final _newClassicRecipes = <CatalogRecipe>[
     id: 'lean-pea-kissel',
     title: 'Кисель гороховый',
     servings: 4,
-    ingredients: {'Горох', 'Вода', 'Лук репчатый', 'Растительное масло', 'Соль'},
     detailedSteps: [
       'Промыть 300 г гороха и замочить его в 900 мл воды на 6–8 часов.',
       'Слить воду, влить 1 000 мл свежей воды, добавить соль и варить горох 50–60 минут до полной мягкости.',
@@ -4439,15 +4184,29 @@ final _newClassicRecipes = <CatalogRecipe>[
       _moduleStep('lean-pea-kissel', 1, CatalogCards.rinse, [
         (card: CatalogCards.peas, grams: 300),
       ]),
-      _moduleStep('lean-pea-kissel', 2, CatalogCards.soak, [
-        (card: CatalogCards.peas, grams: 300),
-        (card: CatalogCards.water, milliliters: 900),
-      ], minutes: 360, upperMinutes: 480),
-      _moduleStep('lean-pea-kissel', 3, CatalogCards.boil, [
-        (card: CatalogCards.peas, grams: 300),
-        (card: CatalogCards.water, milliliters: 1000),
-        (card: CatalogCards.salt, grams: 5),
-      ], minutes: 50, upperMinutes: 60),
+      _moduleStep(
+        'lean-pea-kissel',
+        2,
+        CatalogCards.soak,
+        [
+          (card: CatalogCards.peas, grams: 300),
+          (card: CatalogCards.water, milliliters: 900),
+        ],
+        minutes: 360,
+        upperMinutes: 480,
+      ),
+      _moduleStep(
+        'lean-pea-kissel',
+        3,
+        CatalogCards.boil,
+        [
+          (card: CatalogCards.peas, grams: 300),
+          (card: CatalogCards.water, milliliters: 1000),
+          (card: CatalogCards.salt, grams: 5),
+        ],
+        minutes: 50,
+        upperMinutes: 60,
+      ),
       _moduleStep('lean-pea-kissel', 4, CatalogCards.blend, [
         (card: CatalogCards.peas, grams: 300),
       ]),
@@ -4457,17 +4216,23 @@ final _newClassicRecipes = <CatalogRecipe>[
       _moduleStep('lean-pea-kissel', 6, CatalogCards.cut, [
         (card: CatalogCards.onion, grams: 120),
       ]),
-      _moduleStep('lean-pea-kissel', 7, CatalogCards.fry, [
-        (card: CatalogCards.onion, grams: 120),
-        (card: CatalogCards.vegetableOil, milliliters: 25),
-      ], minutes: 6, upperMinutes: 8),
+      _moduleStep(
+        'lean-pea-kissel',
+        7,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.onion, grams: 120),
+          (card: CatalogCards.vegetableOil, milliliters: 25),
+        ],
+        minutes: 6,
+        upperMinutes: 8,
+      ),
     ],
   ),
   CatalogRecipe(
     id: 'lean-shchi-grains-mushrooms',
     title: 'Щи с крупой и грибами',
     servings: 6,
-    ingredients: {'Капуста', 'Грибы', 'Перловая крупа', 'Картошка', 'Морковь', 'Лук репчатый', 'Вода', 'Растительное масло', 'Соль', 'Лавровый лист'},
     detailedSteps: [
       'Промыть 120 г перловой крупы и замочить её на 2 часа.',
       'Нашинковать 500 г капусты; нарезать 300 г картошки, 150 г моркови, 120 г лука и 300 г грибов.',
@@ -4476,31 +4241,59 @@ final _newClassicRecipes = <CatalogRecipe>[
       'Варить щи 30–35 минут, затем добавить обжаренные овощи с грибами и варить ещё 10 минут.',
     ],
     buildSteps: () => [
-      _moduleStep('lean-shchi', 1, CatalogCards.rinse, [(card: CatalogCards.pearlBarley, grams: 120)]),
-      _moduleStep('lean-shchi', 2, CatalogCards.soak, [(card: CatalogCards.pearlBarley, grams: 120)], minutes: 120),
-      _moduleStep('lean-shchi', 3, CatalogCards.shred, [(card: CatalogCards.cabbage, grams: 500)]),
+      _moduleStep('lean-shchi', 1, CatalogCards.rinse, [
+        (card: CatalogCards.pearlBarley, grams: 120),
+      ]),
+      _moduleStep('lean-shchi', 2, CatalogCards.soak, [
+        (card: CatalogCards.pearlBarley, grams: 120),
+      ], minutes: 120),
+      _moduleStep('lean-shchi', 3, CatalogCards.shred, [
+        (card: CatalogCards.cabbage, grams: 500),
+      ]),
       _moduleStep('lean-shchi', 4, CatalogCards.cut, [
-        (card: CatalogCards.potato, grams: 300), (card: CatalogCards.carrot, grams: 150),
-        (card: CatalogCards.onion, grams: 120), (card: CatalogCards.mushrooms, grams: 300),
+        (card: CatalogCards.potato, grams: 300),
+        (card: CatalogCards.carrot, grams: 150),
+        (card: CatalogCards.onion, grams: 120),
+        (card: CatalogCards.mushrooms, grams: 300),
       ]),
-      _moduleStep('lean-shchi', 5, CatalogCards.fry, [
-        (card: CatalogCards.onion, grams: 120), (card: CatalogCards.carrot, grams: 150),
-        (card: CatalogCards.mushrooms, grams: 300), (card: CatalogCards.vegetableOil, milliliters: 30),
-      ], minutes: 8, upperMinutes: 10),
+      _moduleStep(
+        'lean-shchi',
+        5,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.onion, grams: 120),
+          (card: CatalogCards.carrot, grams: 150),
+          (card: CatalogCards.mushrooms, grams: 300),
+          (card: CatalogCards.vegetableOil, milliliters: 30),
+        ],
+        minutes: 8,
+        upperMinutes: 10,
+      ),
       _moduleStep('lean-shchi', 6, CatalogCards.add, [
-        (card: CatalogCards.water, milliliters: 1800), (card: CatalogCards.pearlBarley, grams: 120),
-        (card: CatalogCards.potato, grams: 300), (card: CatalogCards.cabbage, grams: 500),
-        (card: CatalogCards.salt, grams: 9), (card: CatalogCards.bayLeaf, pieces: 2),
+        (card: CatalogCards.water, milliliters: 1800),
+        (card: CatalogCards.pearlBarley, grams: 120),
+        (card: CatalogCards.potato, grams: 300),
+        (card: CatalogCards.cabbage, grams: 500),
+        (card: CatalogCards.salt, grams: 9),
+        (card: CatalogCards.bayLeaf, pieces: 2),
       ]),
-      _moduleStep('lean-shchi', 7, CatalogCards.boil, [(card: CatalogCards.cabbage, grams: 500)], minutes: 30, upperMinutes: 35),
-      _moduleStep('lean-shchi', 8, CatalogCards.boil, [(card: CatalogCards.mushrooms, grams: 300)], minutes: 10),
+      _moduleStep(
+        'lean-shchi',
+        7,
+        CatalogCards.boil,
+        [(card: CatalogCards.cabbage, grams: 500)],
+        minutes: 30,
+        upperMinutes: 35,
+      ),
+      _moduleStep('lean-shchi', 8, CatalogCards.boil, [
+        (card: CatalogCards.mushrooms, grams: 300),
+      ], minutes: 10),
     ],
   ),
   CatalogRecipe(
     id: 'lean-stuffed-turnip',
     title: 'Репа чинёная с грибами и рисом',
     servings: 4,
-    ingredients: {'Репа', 'Грибы', 'Рис', 'Лук репчатый', 'Растительное масло', 'Вода', 'Соль'},
     detailedSteps: [
       'Промыть 120 г риса и варить его в 250 мл воды 15 минут.',
       'Очистить 800 г репы и варить её 15–20 минут до полуготовности.',
@@ -4509,22 +4302,57 @@ final _newClassicRecipes = <CatalogRecipe>[
       'Запекать репу при 180 °C 25–30 минут.',
     ],
     buildSteps: () => [
-      _moduleStep('stuffed-turnip', 1, CatalogCards.rinse, [(card: CatalogCards.rice, grams: 120)]),
-      _moduleStep('stuffed-turnip', 2, CatalogCards.boil, [(card: CatalogCards.rice, grams: 120), (card: CatalogCards.water, milliliters: 250)], minutes: 15),
-      _moduleStep('stuffed-turnip', 3, CatalogCards.clean, [(card: CatalogCards.turnip, grams: 800)]),
-      _moduleStep('stuffed-turnip', 4, CatalogCards.boil, [(card: CatalogCards.turnip, grams: 800)], minutes: 15, upperMinutes: 20),
-      _moduleStep('stuffed-turnip', 5, CatalogCards.cut, [(card: CatalogCards.mushrooms, grams: 250), (card: CatalogCards.onion, grams: 100)]),
-      _moduleStep('stuffed-turnip', 6, CatalogCards.fry, [(card: CatalogCards.mushrooms, grams: 250), (card: CatalogCards.onion, grams: 100), (card: CatalogCards.vegetableOil, milliliters: 25)], minutes: 8),
-      _moduleStep('stuffed-turnip', 7, CatalogCards.mix, [(card: CatalogCards.rice, grams: 120), (card: CatalogCards.mushrooms, grams: 250), (card: CatalogCards.salt, grams: 5)]),
-      _moduleStep('stuffed-turnip', 8, CatalogCards.fill, [(card: CatalogCards.turnip, grams: 800), (card: CatalogCards.rice, grams: 120)]),
-      _moduleStep('stuffed-turnip', 9, CatalogCards.bake, [(card: CatalogCards.turnip, grams: 800)], temperature: 180, minutes: 25, upperMinutes: 30),
+      _moduleStep('stuffed-turnip', 1, CatalogCards.rinse, [
+        (card: CatalogCards.rice, grams: 120),
+      ]),
+      _moduleStep('stuffed-turnip', 2, CatalogCards.boil, [
+        (card: CatalogCards.rice, grams: 120),
+        (card: CatalogCards.water, milliliters: 250),
+      ], minutes: 15),
+      _moduleStep('stuffed-turnip', 3, CatalogCards.clean, [
+        (card: CatalogCards.turnip, grams: 800),
+      ]),
+      _moduleStep(
+        'stuffed-turnip',
+        4,
+        CatalogCards.boil,
+        [(card: CatalogCards.turnip, grams: 800)],
+        minutes: 15,
+        upperMinutes: 20,
+      ),
+      _moduleStep('stuffed-turnip', 5, CatalogCards.cut, [
+        (card: CatalogCards.mushrooms, grams: 250),
+        (card: CatalogCards.onion, grams: 100),
+      ]),
+      _moduleStep('stuffed-turnip', 6, CatalogCards.fry, [
+        (card: CatalogCards.mushrooms, grams: 250),
+        (card: CatalogCards.onion, grams: 100),
+        (card: CatalogCards.vegetableOil, milliliters: 25),
+      ], minutes: 8),
+      _moduleStep('stuffed-turnip', 7, CatalogCards.mix, [
+        (card: CatalogCards.rice, grams: 120),
+        (card: CatalogCards.mushrooms, grams: 250),
+        (card: CatalogCards.salt, grams: 5),
+      ]),
+      _moduleStep('stuffed-turnip', 8, CatalogCards.fill, [
+        (card: CatalogCards.turnip, grams: 800),
+        (card: CatalogCards.rice, grams: 120),
+      ]),
+      _moduleStep(
+        'stuffed-turnip',
+        9,
+        CatalogCards.bake,
+        [(card: CatalogCards.turnip, grams: 800)],
+        temperature: 180,
+        minutes: 25,
+        upperMinutes: 30,
+      ),
     ],
   ),
   CatalogRecipe(
     id: 'lean-kundyubki',
     title: 'Кундюбки с грибами',
     servings: 6,
-    ingredients: {'Мука', 'Вода', 'Растительное масло', 'Грибы', 'Гречка', 'Лук репчатый', 'Соль'},
     detailedSteps: [
       'Смешать 350 г муки, 160 мл воды, 30 мл растительного масла и соль; вымесить тесто.',
       'Промыть 120 г гречки и варить её 15 минут.',
@@ -4533,23 +4361,63 @@ final _newClassicRecipes = <CatalogRecipe>[
       'Запекать кундюбки при 190 °C 20–25 минут.',
     ],
     buildSteps: () => [
-      _moduleStep('kundyubki', 1, CatalogCards.knead, [(card: CatalogCards.flour, grams: 350), (card: CatalogCards.water, milliliters: 160), (card: CatalogCards.vegetableOil, milliliters: 30), (card: CatalogCards.salt, grams: 4)]),
-      _moduleStep('kundyubki', 2, CatalogCards.rinse, [(card: CatalogCards.buckwheat, grams: 120)]),
-      _moduleStep('kundyubki', 3, CatalogCards.boil, [(card: CatalogCards.buckwheat, grams: 120), (card: CatalogCards.water, milliliters: 260)], minutes: 15),
-      _moduleStep('kundyubki', 4, CatalogCards.cut, [(card: CatalogCards.mushrooms, grams: 300), (card: CatalogCards.onion, grams: 120)]),
-      _moduleStep('kundyubki', 5, CatalogCards.fry, [(card: CatalogCards.mushrooms, grams: 300), (card: CatalogCards.onion, grams: 120), (card: CatalogCards.vegetableOil, milliliters: 25)], minutes: 8, upperMinutes: 10),
-      _moduleStep('kundyubki', 6, CatalogCards.mix, [(card: CatalogCards.buckwheat, grams: 120), (card: CatalogCards.mushrooms, grams: 300)]),
-      _moduleStep('kundyubki', 7, CatalogCards.rollOut, [(card: CatalogCards.flour, grams: 350)]),
-      _moduleStep('kundyubki', 8, CatalogCards.wrap, [(card: CatalogCards.mushrooms, grams: 300)]),
-      _moduleStep('kundyubki', 9, CatalogCards.pinch, [(card: CatalogCards.mushrooms, grams: 300)]),
-      _moduleStep('kundyubki', 10, CatalogCards.bake, [(card: CatalogCards.mushrooms, grams: 300)], temperature: 190, minutes: 20, upperMinutes: 25),
+      _moduleStep('kundyubki', 1, CatalogCards.knead, [
+        (card: CatalogCards.flour, grams: 350),
+        (card: CatalogCards.water, milliliters: 160),
+        (card: CatalogCards.vegetableOil, milliliters: 30),
+        (card: CatalogCards.salt, grams: 4),
+      ]),
+      _moduleStep('kundyubki', 2, CatalogCards.rinse, [
+        (card: CatalogCards.buckwheat, grams: 120),
+      ]),
+      _moduleStep('kundyubki', 3, CatalogCards.boil, [
+        (card: CatalogCards.buckwheat, grams: 120),
+        (card: CatalogCards.water, milliliters: 260),
+      ], minutes: 15),
+      _moduleStep('kundyubki', 4, CatalogCards.cut, [
+        (card: CatalogCards.mushrooms, grams: 300),
+        (card: CatalogCards.onion, grams: 120),
+      ]),
+      _moduleStep(
+        'kundyubki',
+        5,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.mushrooms, grams: 300),
+          (card: CatalogCards.onion, grams: 120),
+          (card: CatalogCards.vegetableOil, milliliters: 25),
+        ],
+        minutes: 8,
+        upperMinutes: 10,
+      ),
+      _moduleStep('kundyubki', 6, CatalogCards.mix, [
+        (card: CatalogCards.buckwheat, grams: 120),
+        (card: CatalogCards.mushrooms, grams: 300),
+      ]),
+      _moduleStep('kundyubki', 7, CatalogCards.rollOut, [
+        (card: CatalogCards.flour, grams: 350),
+      ]),
+      _moduleStep('kundyubki', 8, CatalogCards.wrap, [
+        (card: CatalogCards.mushrooms, grams: 300),
+      ]),
+      _moduleStep('kundyubki', 9, CatalogCards.pinch, [
+        (card: CatalogCards.mushrooms, grams: 300),
+      ]),
+      _moduleStep(
+        'kundyubki',
+        10,
+        CatalogCards.bake,
+        [(card: CatalogCards.mushrooms, grams: 300)],
+        temperature: 190,
+        minutes: 20,
+        upperMinutes: 25,
+      ),
     ],
   ),
   CatalogRecipe(
     id: 'lean-kulebyaka-cabbage-mushrooms',
     title: 'Кулебяка с капустой и грибами',
     servings: 8,
-    ingredients: {'Мука', 'Вода', 'Растительное масло', 'Дрожжи сухие', 'Сахар', 'Капуста', 'Грибы', 'Лук репчатый', 'Соль'},
     detailedSteps: [
       'Смешать 500 г муки, 280 мл воды, 7 г сухих дрожжей, 15 г сахара, 35 мл масла и соль; вымесить тесто.',
       'Нашинковать 700 г капусты, нарезать 300 г грибов и 150 г лука.',
@@ -4558,22 +4426,54 @@ final _newClassicRecipes = <CatalogRecipe>[
       'Выпекать кулебяку при 190 °C 35–40 минут.',
     ],
     buildSteps: () => [
-      _moduleStep('lean-kulebyaka', 1, CatalogCards.knead, [(card: CatalogCards.flour, grams: 500), (card: CatalogCards.water, milliliters: 280), (card: CatalogCards.yeast, grams: 7), (card: CatalogCards.sugar, grams: 15), (card: CatalogCards.vegetableOil, milliliters: 35), (card: CatalogCards.salt, grams: 6)]),
-      _moduleStep('lean-kulebyaka', 2, CatalogCards.shred, [(card: CatalogCards.cabbage, grams: 700)]),
-      _moduleStep('lean-kulebyaka', 3, CatalogCards.cut, [(card: CatalogCards.mushrooms, grams: 300), (card: CatalogCards.onion, grams: 150)]),
-      _moduleStep('lean-kulebyaka', 4, CatalogCards.fry, [(card: CatalogCards.mushrooms, grams: 300), (card: CatalogCards.onion, grams: 150), (card: CatalogCards.vegetableOil, milliliters: 25)], minutes: 8),
-      _moduleStep('lean-kulebyaka', 5, CatalogCards.stew, [(card: CatalogCards.cabbage, grams: 700), (card: CatalogCards.mushrooms, grams: 300)], minutes: 15),
-      _moduleStep('lean-kulebyaka', 6, CatalogCards.rollOut, [(card: CatalogCards.flour, grams: 500)]),
-      _moduleStep('lean-kulebyaka', 7, CatalogCards.wrap, [(card: CatalogCards.cabbage, grams: 700)]),
-      _moduleStep('lean-kulebyaka', 8, CatalogCards.pinch, [(card: CatalogCards.cabbage, grams: 700)]),
-      _moduleStep('lean-kulebyaka', 9, CatalogCards.bake, [(card: CatalogCards.cabbage, grams: 700)], temperature: 190, minutes: 35, upperMinutes: 40),
+      _moduleStep('lean-kulebyaka', 1, CatalogCards.knead, [
+        (card: CatalogCards.flour, grams: 500),
+        (card: CatalogCards.water, milliliters: 280),
+        (card: CatalogCards.yeast, grams: 7),
+        (card: CatalogCards.sugar, grams: 15),
+        (card: CatalogCards.vegetableOil, milliliters: 35),
+        (card: CatalogCards.salt, grams: 6),
+      ]),
+      _moduleStep('lean-kulebyaka', 2, CatalogCards.shred, [
+        (card: CatalogCards.cabbage, grams: 700),
+      ]),
+      _moduleStep('lean-kulebyaka', 3, CatalogCards.cut, [
+        (card: CatalogCards.mushrooms, grams: 300),
+        (card: CatalogCards.onion, grams: 150),
+      ]),
+      _moduleStep('lean-kulebyaka', 4, CatalogCards.fry, [
+        (card: CatalogCards.mushrooms, grams: 300),
+        (card: CatalogCards.onion, grams: 150),
+        (card: CatalogCards.vegetableOil, milliliters: 25),
+      ], minutes: 8),
+      _moduleStep('lean-kulebyaka', 5, CatalogCards.stew, [
+        (card: CatalogCards.cabbage, grams: 700),
+        (card: CatalogCards.mushrooms, grams: 300),
+      ], minutes: 15),
+      _moduleStep('lean-kulebyaka', 6, CatalogCards.rollOut, [
+        (card: CatalogCards.flour, grams: 500),
+      ]),
+      _moduleStep('lean-kulebyaka', 7, CatalogCards.wrap, [
+        (card: CatalogCards.cabbage, grams: 700),
+      ]),
+      _moduleStep('lean-kulebyaka', 8, CatalogCards.pinch, [
+        (card: CatalogCards.cabbage, grams: 700),
+      ]),
+      _moduleStep(
+        'lean-kulebyaka',
+        9,
+        CatalogCards.bake,
+        [(card: CatalogCards.cabbage, grams: 700)],
+        temperature: 190,
+        minutes: 35,
+        upperMinutes: 40,
+      ),
     ],
   ),
   CatalogRecipe(
     id: 'lean-levashniki-apple',
     title: 'Левашники с яблоком',
     servings: 6,
-    ingredients: {'Мука', 'Вода', 'Растительное масло', 'Яблоки', 'Сахар'},
     detailedSteps: [
       'Смешать 350 г муки, 180 мл воды и 20 мл растительного масла; вымесить тесто.',
       'Очистить и измельчить 500 г яблок, смешать их со 100 г сахара.',
@@ -4581,30 +4481,44 @@ final _newClassicRecipes = <CatalogRecipe>[
       'Жарить левашники в 250 мл растительного масла по 3–4 минуты с каждой стороны.',
     ],
     buildSteps: () => [
-      _moduleStep('lean-levashniki', 1, CatalogCards.knead, [(card: CatalogCards.flour, grams: 350), (card: CatalogCards.water, milliliters: 180), (card: CatalogCards.vegetableOil, milliliters: 20)]),
-      _moduleStep('lean-levashniki', 2, CatalogCards.clean, [(card: CatalogCards.apples, grams: 500)]),
-      _moduleStep('lean-levashniki', 3, CatalogCards.blend, [(card: CatalogCards.apples, grams: 500), (card: CatalogCards.sugar, grams: 100)]),
-      _moduleStep('lean-levashniki', 4, CatalogCards.rollOut, [(card: CatalogCards.flour, grams: 350)]),
-      _moduleStep('lean-levashniki', 5, CatalogCards.wrap, [(card: CatalogCards.apples, grams: 500)]),
-      _moduleStep('lean-levashniki', 6, CatalogCards.pinch, [(card: CatalogCards.apples, grams: 500)]),
-      _moduleStep('lean-levashniki', 7, CatalogCards.fry, [(card: CatalogCards.apples, grams: 500), (card: CatalogCards.vegetableOil, milliliters: 250)], minutes: 3, upperMinutes: 4),
+      _moduleStep('lean-levashniki', 1, CatalogCards.knead, [
+        (card: CatalogCards.flour, grams: 350),
+        (card: CatalogCards.water, milliliters: 180),
+        (card: CatalogCards.vegetableOil, milliliters: 20),
+      ]),
+      _moduleStep('lean-levashniki', 2, CatalogCards.clean, [
+        (card: CatalogCards.apples, grams: 500),
+      ]),
+      _moduleStep('lean-levashniki', 3, CatalogCards.blend, [
+        (card: CatalogCards.apples, grams: 500),
+        (card: CatalogCards.sugar, grams: 100),
+      ]),
+      _moduleStep('lean-levashniki', 4, CatalogCards.rollOut, [
+        (card: CatalogCards.flour, grams: 350),
+      ]),
+      _moduleStep('lean-levashniki', 5, CatalogCards.wrap, [
+        (card: CatalogCards.apples, grams: 500),
+      ]),
+      _moduleStep('lean-levashniki', 6, CatalogCards.pinch, [
+        (card: CatalogCards.apples, grams: 500),
+      ]),
+      _moduleStep(
+        'lean-levashniki',
+        7,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.apples, grams: 500),
+          (card: CatalogCards.vegetableOil, milliliters: 250),
+        ],
+        minutes: 3,
+        upperMinutes: 4,
+      ),
     ],
   ),
   CatalogRecipe(
     id: 'fried-mushrooms-sour-cream',
     title: 'Грибы, жаренные в сметане',
     servings: 4,
-    ingredients: {
-      'Грибы',
-      'Лук репчатый',
-      'Сметана',
-      'Мука',
-      'Вода',
-      'Растительное масло',
-      'Соль',
-      'Чёрный молотый перец',
-      'Укроп',
-    },
     detailedSteps: [
       'Нарезать 500 г грибов и 120 г лука.',
       'Обжарить лук в 25 мл растительного масла 3–4 минуты.',
@@ -4619,13 +4533,25 @@ final _newClassicRecipes = <CatalogRecipe>[
         (card: CatalogCards.mushrooms, grams: 500),
         (card: CatalogCards.onion, grams: 120),
       ]),
-      _moduleStep('fried-mushrooms-sour-cream', 2, CatalogCards.fry, [
-        (card: CatalogCards.onion, grams: 120),
-        (card: CatalogCards.vegetableOil, milliliters: 25),
-      ], minutes: 3, upperMinutes: 4),
-      _moduleStep('fried-mushrooms-sour-cream', 3, CatalogCards.fry, [
-        (card: CatalogCards.mushrooms, grams: 500),
-      ], minutes: 8, upperMinutes: 10),
+      _moduleStep(
+        'fried-mushrooms-sour-cream',
+        2,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.onion, grams: 120),
+          (card: CatalogCards.vegetableOil, milliliters: 25),
+        ],
+        minutes: 3,
+        upperMinutes: 4,
+      ),
+      _moduleStep(
+        'fried-mushrooms-sour-cream',
+        3,
+        CatalogCards.fry,
+        [(card: CatalogCards.mushrooms, grams: 500)],
+        minutes: 8,
+        upperMinutes: 10,
+      ),
       _moduleStep('fried-mushrooms-sour-cream', 4, CatalogCards.mix, [
         (card: CatalogCards.sourCream, grams: 200),
         (card: CatalogCards.flour, grams: 10),
@@ -4636,9 +4562,14 @@ final _newClassicRecipes = <CatalogRecipe>[
         (card: CatalogCards.salt, grams: 5),
         (card: CatalogCards.blackPepper, grams: 1),
       ]),
-      _moduleStep('fried-mushrooms-sour-cream', 6, CatalogCards.stew, [
-        (card: CatalogCards.mushrooms, grams: 500),
-      ], minutes: 5, upperMinutes: 7),
+      _moduleStep(
+        'fried-mushrooms-sour-cream',
+        6,
+        CatalogCards.stew,
+        [(card: CatalogCards.mushrooms, grams: 500)],
+        minutes: 5,
+        upperMinutes: 7,
+      ),
       _moduleStep('fried-mushrooms-sour-cream', 7, CatalogCards.add, [
         (card: CatalogCards.dill, grams: 10),
       ]),
@@ -4672,14 +4603,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'cabbage-potato-pancakes',
     title: 'Драники из капусты и картошки',
-    ingredients: {
-      'Капуста',
-      'Картошка',
-      'Яйца',
-      'Мука',
-      'Соль',
-      'Растительное масло',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2: вынуть чашу, вытереть её насухо и поставить на место.',
       'Тонко нашинковать 1 кг белокочанной капусты, посолить 10 г соли, перемешать и оставить на 10 минут.',
@@ -4692,13 +4615,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Переложить готовые драники на тарелку и подавать горячими.',
     ],
     buildSteps: () => [
-      _node('dran-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'dran-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('dran-1', CatalogCards.grate, [
         _ingredient('dran-1-cabbage', CatalogCards.cabbage, [
           RecipeNode(
@@ -4778,9 +4694,7 @@ final catalogRecipes = <CatalogRecipe>[
         _ingredient('dran-7-eggs', CatalogCards.eggs),
         _ingredient('dran-7-flour', CatalogCards.flour),
       ]),
-      _node('dran-8', CatalogCards.select, [
-        _multicookerProgram('dran-8-mode', 'Жарка'),
-      ]),
+      _multicookerStep('dran-8', 'Жарка'),
       _node('dran-9', CatalogCards.add, [
         _ingredient('dran-9-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -4829,17 +4743,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'curd-casserole-apples',
     title: 'Творожная запеканка с яблоками',
-    ingredients: {
-      'Творог',
-      'Яблоки',
-      'Яйца',
-      'Мука',
-      'Сахар',
-      'Сметана',
-      'Соль',
-      'Сливочное масло',
-      'Разрыхлитель',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2: вынуть чашу и проверить, что она сухая.',
       'Очистить 2 яблока, удалить сердцевину, нарезать кубиками 8–10 мм; прогреть на сухой сковороде 4–5 минут и полностью остудить.',
@@ -4851,13 +4754,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Выключить подогрев, оставить в чаше 15 минут, затем открыть крышку и остудить ещё 10–15 минут.',
     ],
     buildSteps: () => [
-      _node('zap-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'zap-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('zap-1', CatalogCards.cut, [
         _ingredient('zap-1-a', CatalogCards.apples, [
           RecipeNode(
@@ -4949,15 +4845,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('zap-7', CatalogCards.select, [
-        _multicookerProgram('zap-7-mode', 'Выпечка'),
-        RecipeNode(
-          id: 'zap-7-time',
-          card: CatalogCards.time,
-          value: 50,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('zap-7', 'Выпечка', 50),
       _node('zap-8', CatalogCards.leave, [
         _ingredient('zap-8-casserole', CatalogCards.cottageCheese),
         RecipeNode(
@@ -4972,7 +4860,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'buckwheat-pudding-apples',
     title: 'Крупник с яблоками',
-    ingredients: {'Гречка', 'Творог', 'Яблоки', 'Яйца'},
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Очистить 1–2 яблока, нарезать кубиками, прогреть 4–5 минут и остудить.',
@@ -4983,13 +4870,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Выключить подогрев, оставить в чаше 15–20 минут, затем остудить полностью.',
     ],
     buildSteps: () => [
-      _node('kr-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'kr-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('kr-1', CatalogCards.mix, [
         _ingredient('kr-1-b', CatalogCards.buckwheat, [
           RecipeNode(
@@ -5079,15 +4959,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('kr-6', CatalogCards.select, [
-        _multicookerProgram('kr-6-mode', 'Выпечка'),
-        RecipeNode(
-          id: 'kr-6-time',
-          card: CatalogCards.time,
-          value: 50,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('kr-6', 'Выпечка', 50),
       _node('kr-7', CatalogCards.leave, [
         _ingredient('kr-7-pudding', CatalogCards.buckwheat),
         RecipeNode(
@@ -5103,15 +4975,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'pork-escalope-cream',
     title: 'Свиные отбивные в яично-сливочном льезоне',
-    ingredients: {
-      'Свинина',
-      'Яйца',
-      'Сливки',
-      'Мука',
-      'Соль',
-      'Чёрный молотый перец',
-      'Растительное масло',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2, включить «Жарку» и прогреть чашу 2–3 минуты.',
       'Эскалопы 1,25 кг при толщине более 1 см слегка отбить до 7–10 мм.',
@@ -5122,13 +4985,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Между партиями удалить подгоревшие остатки смеси и при необходимости добавить немного масла.',
     ],
     buildSteps: () => [
-      _node('pork-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'pork-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('pork-1', CatalogCards.beat, [
         _ingredient('pork-1-meat', CatalogCards.pork, [
           RecipeNode(
@@ -5186,9 +5042,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('pork-6', CatalogCards.select, [
-        _multicookerProgram('pork-6-mode', 'Жарка'),
-      ]),
+      _multicookerStep('pork-6', 'Жарка'),
       _node('pork-7', CatalogCards.add, [
         _ingredient('pork-7-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -5218,19 +5072,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'fresh-cabbage-soup',
     title: 'Щи из свежей капусты со свининой',
-    ingredients: {
-      'Свинина',
-      'Капуста',
-      'Картошка',
-      'Морковь',
-      'Лук репчатый',
-      'Вода',
-      'Растительное масло',
-      'Соль',
-      'Чёрный молотый перец',
-      'Лавровый лист',
-      'Чеснок',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Нарезать 700 г свиной лопатки кусками 3–4 см; обжарить на «Жарке» в 1 ст. л. масла 6–8 минут.',
@@ -5242,13 +5083,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Посолить, поперчить и оставить под крышкой без давления на 15–20 минут.',
     ],
     buildSteps: () => [
-      _node('soup-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'soup-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('soup-1', CatalogCards.cut, [
         _ingredient('soup-1-p', CatalogCards.pork, [
           RecipeNode(
@@ -5259,9 +5093,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('soup-2', CatalogCards.select, [
-        _multicookerProgram('soup-2-mode', 'Жарка'),
-      ]),
+      _multicookerStep('soup-2', 'Жарка'),
       _node('soup-3', CatalogCards.add, [
         _ingredient('soup-3-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -5308,15 +5140,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('soup-6', CatalogCards.select, [
-        _multicookerProgram('soup-6-mode', 'Суп'),
-        RecipeNode(
-          id: 'soup-6-time',
-          card: CatalogCards.time,
-          value: 25,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('soup-6', 'Суп', 25),
       _node('soup-7', CatalogCards.cut, [
         _ingredient('soup-7-potato', CatalogCards.potato, [
           RecipeNode(
@@ -5358,15 +5182,7 @@ final catalogRecipes = <CatalogRecipe>[
         ]),
         _ingredient('soup-9-bay', CatalogCards.bayLeaf),
       ]),
-      _node('soup-10', CatalogCards.select, [
-        _multicookerProgram('soup-10-mode', 'Суп'),
-        RecipeNode(
-          id: 'soup-10-time',
-          card: CatalogCards.time,
-          value: 5,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('soup-10', 'Суп', 5),
       _node('soup-11', CatalogCards.add, [
         _ingredient('soup-11-salt', CatalogCards.salt, [
           RecipeNode(
@@ -5394,7 +5210,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'milk-buckwheat',
     title: 'Гречка на молоке',
-    ingredients: {'Гречка', 'Молоко', 'Вода', 'Соль'},
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Промыть 200 г гречки 2–3 раза и тщательно слить воду.',
@@ -5405,13 +5220,6 @@ final catalogRecipes = <CatalogRecipe>[
       'После завершения подождать 10 минут, затем аккуратно сбросить остаточное давление и открыть крышку.',
     ],
     buildSteps: () => [
-      _node('milk-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'milk-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('milk-1', CatalogCards.rinse, [
         _ingredient('milk-1-b', CatalogCards.buckwheat, [
           RecipeNode(
@@ -5457,15 +5265,7 @@ final catalogRecipes = <CatalogRecipe>[
       _node('milk-5', CatalogCards.close, [
         _ingredient('milk-5-l', CatalogCards.lid),
       ]),
-      _node('milk-6', CatalogCards.select, [
-        _multicookerProgram('milk-6-mode', 'Молочная каша'),
-        RecipeNode(
-          id: 'milk-6-time',
-          card: CatalogCards.time,
-          value: 10,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('milk-6', 'Молочная каша', 10),
       _node('milk-7', CatalogCards.leave, [
         _ingredient('milk-7-porridge', CatalogCards.buckwheat),
         RecipeNode(
@@ -5490,21 +5290,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'merchant-buckwheat-chicken',
     title: 'Гречка по-купечески с куриным филе',
-    ingredients: {
-      'Куриное филе',
-      'Гречка',
-      'Вода',
-      'Лук репчатый',
-      'Морковь',
-      'Томатная паста',
-      'Растительное масло',
-      'Чеснок',
-      'Соль',
-      'Чёрный молотый перец',
-      'Паприка сладкая',
-      'Лавровый лист',
-      'Сливочное масло',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2. Нарезать 750 г куриного филе кубиками по 2–3 см, 150 г лука — небольшими кубиками, натереть 150 г моркови и промыть 350 г гречки 2–3 раза.',
       'На программе «Жарка» с открытой крышкой нагреть 25 мл растительного масла. Обжарить курицу 6–8 минут до лёгкой корочки, не дожидаясь полной готовности.',
@@ -5516,13 +5301,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Если крупа получилась слегка твёрдой, влить 30–50 мл горячей воды и довести до готовности с открытой крышкой.',
     ],
     buildSteps: () => [
-      _node('merchant-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'merchant-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('merchant-1', CatalogCards.cut, [
         _ingredient('merchant-1-chicken', CatalogCards.chickenFillet, [
           RecipeNode(
@@ -5563,9 +5341,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('merchant-5', CatalogCards.select, [
-        _multicookerProgram('merchant-5-mode', 'Жарка'),
-      ]),
+      _multicookerStep('merchant-5', 'Жарка'),
       _node('merchant-6', CatalogCards.add, [
         _ingredient('merchant-6-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -5673,15 +5449,7 @@ final catalogRecipes = <CatalogRecipe>[
           caseFromParent: GrammarCase.accusative,
         ),
       ]),
-      _node('merchant-18', CatalogCards.select, [
-        _multicookerProgram('merchant-18-mode', 'Тушение'),
-        RecipeNode(
-          id: 'merchant-18-time',
-          card: CatalogCards.time,
-          value: 7,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('merchant-18', 'Тушение', 7),
       _node('merchant-19', CatalogCards.leave, [
         _ingredient('merchant-19-buckwheat', CatalogCards.buckwheat),
         RecipeNode(
@@ -5733,7 +5501,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'apple-plum-jam',
     title: 'Яблочно-сливовый джем',
-    ingredients: {'Яблоки', 'Сливы', 'Сахар'},
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Вымыть 900 г яблок и 480 г слив без косточек; у яблок удалить сердцевины и нарезать фрукты.',
@@ -5743,13 +5510,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Остудить джем до комнатной температуры и разложить в ёмкости, оставив свободное место для заморозки.',
     ],
     buildSteps: () => [
-      _node('jam-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'jam-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('jam-1', CatalogCards.rinse, [
         _ingredient('jam-1-apples', CatalogCards.apples),
         _ingredient('jam-1-plums', CatalogCards.plums),
@@ -5784,9 +5544,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('jam-4', CatalogCards.select, [
-        _multicookerProgram('jam-4-mode', 'Джем/Десерт'),
-      ]),
+      _multicookerStep('jam-4', 'Джем/Десерт'),
       _node('jam-5', CatalogCards.boil, [
         _ingredient('jam-5-apples', CatalogCards.apples),
         _ingredient('jam-5-plums', CatalogCards.plums),
@@ -5814,26 +5572,7 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'zucchini-sour-cream',
     title: 'Кабачки, тушённые в сметане',
-    ingredients: {
-      'Кабачки',
-      'Лук репчатый',
-      'Сметана',
-      'Чеснок',
-      'Растительное масло',
-      'Пшеничная мука',
-      'Вода',
-      'Соль',
-      'Чёрный молотый перец',
-      'Укроп',
-    },
     buildSteps: () => [
-      _node('zuc-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'zuc-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('zuc-1', CatalogCards.cut, [
         _ingredient('zuc-1-c', CatalogCards.zucchini, [
           RecipeNode(
@@ -5892,9 +5631,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('zuc-6', CatalogCards.select, [
-        _multicookerProgram('zuc-6-mode', 'Жарка'),
-      ]),
+      _multicookerStep('zuc-6', 'Жарка'),
       _node('zuc-7', CatalogCards.add, [
         _ingredient('zuc-7-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -5994,17 +5731,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'potato-baba-meat',
     title: 'Картофельная баба с мясом',
-    ingredients: {
-      'Картошка',
-      'Куриное филе',
-      'Лук репчатый',
-      'Яйца',
-      'Пшеничная мука',
-      'Сметана',
-      'Растительное масло',
-      'Соль',
-      'Чёрный молотый перец',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Нарезать 850 г филе цыплёнка-бройлера кубиками 1–1,5 см и мелко нарезать 200 г лука.',
@@ -6016,13 +5742,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Оставить блюдо под закрытой крышкой 15 минут, затем с открытой крышкой ещё 10–15 минут. Полностью остывшую бабу можно нарезать и заморозить.',
     ],
     buildSteps: () => [
-      _node('baba-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'baba-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('baba-1', CatalogCards.cut, [
         _ingredient('baba-1-chicken', CatalogCards.chickenFillet, [
           RecipeNode(
@@ -6043,9 +5762,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('baba-3', CatalogCards.select, [
-        _multicookerProgram('baba-3-mode', 'Жарка'),
-      ]),
+      _multicookerStep('baba-3', 'Жарка'),
       _node('baba-4', CatalogCards.saute, [
         _ingredient('baba-4-onion', CatalogCards.onion),
         RecipeNode(
@@ -6116,15 +5833,7 @@ final catalogRecipes = <CatalogRecipe>[
       _node('baba-10', CatalogCards.grease, [
         _ingredient('baba-10-oil', CatalogCards.vegetableOil),
       ]),
-      _node('baba-11', CatalogCards.select, [
-        _multicookerProgram('baba-11-mode', 'Выпечка'),
-        RecipeNode(
-          id: 'baba-11-time',
-          card: CatalogCards.time,
-          value: 60,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('baba-11', 'Выпечка', 60),
       _node('baba-12', CatalogCards.leave, [
         _ingredient('baba-12-baba', CatalogCards.potato),
         RecipeNode(
@@ -6156,19 +5865,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'meat-egg-casserole',
     title: 'Яичная запеканка с мясом',
-    ingredients: {
-      'Свинина',
-      'Яйца',
-      'Сметана',
-      'Лук репчатый',
-      'Сыр твёрдый',
-      'Кукурузный крахмал',
-      'Паприка сладкая',
-      'Соль',
-      'Чёрный молотый перец',
-      'Растительное масло',
-      'Вода',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Нарезать 1 500 г свинины кубиками 1,5–2 см, 200 г лука — мелкими кубиками; натереть 150 г твёрдого сыра.',
@@ -6178,13 +5874,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Смазать чашу растительным маслом. Выпекать каждую партию 55 минут, затем оставить в чаше на 15–20 минут перед извлечением.',
     ],
     buildSteps: () => [
-      _node('egg-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'egg-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('egg-1', CatalogCards.cut, [
         _ingredient('egg-1-meat', CatalogCards.pork, [
           RecipeNode(
@@ -6215,9 +5904,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('egg-4', CatalogCards.select, [
-        _multicookerProgram('egg-4-mode', 'Жарка'),
-      ]),
+      _multicookerStep('egg-4', 'Жарка'),
       _node('egg-5', CatalogCards.fry, [
         _ingredient('egg-5-meat', CatalogCards.pork),
         RecipeNode(
@@ -6261,15 +5948,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('egg-9', CatalogCards.select, [
-        _multicookerProgram('egg-9-mode', 'Тушение'),
-        RecipeNode(
-          id: 'egg-9-time',
-          card: CatalogCards.time,
-          value: 25,
-          unit: NumericUnit.minutes,
-        ),
-      ]),
+      _multicookerStep('egg-9', 'Тушение', 25),
       _node('egg-10', CatalogCards.leave, [
         _ingredient('egg-10-meat', CatalogCards.pork),
         RecipeNode(
@@ -6296,15 +5975,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'milk-pancakes',
     title: 'Оладьи на молоке',
-    ingredients: {
-      'Молоко',
-      'Яйца',
-      'Сахар',
-      'Соль',
-      'Мука',
-      'Разрыхлитель',
-      'Растительное масло',
-    },
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2; оладьи готовятся на программе «Жарка».',
       'Подогреть 900 г молока до 30–35 °C.',
@@ -6314,13 +5984,6 @@ final catalogRecipes = <CatalogRecipe>[
       'На «Жарке» налить масло тонким слоем; выкладывать тесто по 1 столовой ложке с горкой и жарить оладьи по 2–3 минуты с каждой стороны.',
     ],
     buildSteps: () => [
-      _node('pan-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'pan-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('pan-1', CatalogCards.heat, [
         _ingredient('pan-1-milk', CatalogCards.milk, [
           RecipeNode(
@@ -6396,9 +6059,7 @@ final catalogRecipes = <CatalogRecipe>[
           unit: NumericUnit.minutes,
         ),
       ]),
-      _node('pan-6', CatalogCards.select, [
-        _multicookerProgram('pan-6-mode', 'Жарка'),
-      ]),
+      _multicookerStep('pan-6', 'Жарка'),
       _node('pan-7', CatalogCards.add, [
         _ingredient('pan-7-oil', CatalogCards.vegetableOil, [
           RecipeNode(
@@ -6424,20 +6085,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'rassolnik-chicken-fillet',
     title: 'Рассольник с куриным филе и перловкой',
-    ingredients: {
-      'Куриное филе',
-      'Перловая крупа',
-      'Картошка',
-      'Солёные огурцы',
-      'Морковь',
-      'Лук репчатый',
-      'Томатная паста',
-      'Огуречный рассол',
-      'Чеснок',
-      'Соль',
-      'Чёрный молотый перец',
-      'Укроп',
-    },
     detailedSteps: [
       'Промыть 100 г перловой крупы, залить 600 мл воды и готовить на «Тушении» под давлением 20 минут; дать давлению снизиться 10 минут.',
       'Обжарить на 20 мл масла 150 г лука 3–4 минуты, добавить 120 г моркови и готовить ещё 3 минуты.',
@@ -6447,13 +6094,6 @@ final catalogRecipes = <CatalogRecipe>[
       'Добавить 70 мл огуречного рассола, чеснок, соль и укроп; прогреть 2–3 минуты и оставить на 15–20 минут с выключенным нагревом.',
     ],
     buildSteps: () => [
-      _node('ras-0', CatalogCards.prepare, [
-        RecipeNode(
-          id: 'ras-0-device',
-          card: CatalogCards.multicooker,
-          caseFromParent: GrammarCase.accusative,
-        ),
-      ]),
       _node('ras-1', CatalogCards.rinse, [
         _ingredient('ras-1-barley', CatalogCards.pearlBarley, [
           RecipeNode(
@@ -6475,9 +6115,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('ras-3', CatalogCards.select, [
-        _multicookerProgram('ras-3-mode', 'Тушение'),
-      ]),
+      _multicookerStep('ras-3', 'Тушение'),
       _node('ras-4', CatalogCards.stew, [
         _ingredient('ras-4-barley', CatalogCards.pearlBarley),
         RecipeNode(
@@ -6591,9 +6229,7 @@ final catalogRecipes = <CatalogRecipe>[
           ),
         ]),
       ]),
-      _node('ras-13', CatalogCards.select, [
-        _multicookerProgram('ras-13-mode', 'Тушение'),
-      ]),
+      _multicookerStep('ras-13', 'Тушение'),
       _node('ras-14', CatalogCards.stew, [
         _ingredient('ras-14-chicken', CatalogCards.chickenFillet),
         _ingredient('ras-14-potato', CatalogCards.potato),
@@ -6671,14 +6307,6 @@ final catalogRecipes = <CatalogRecipe>[
   CatalogRecipe(
     id: 'milk-bread-oven',
     title: 'Домашний пшеничный хлеб на молоке',
-    ingredients: {
-      'Молоко',
-      'Мука',
-      'Дрожжи сухие быстродействующие',
-      'Сахар',
-      'Соль',
-      'Сливочное масло',
-    },
     detailedSteps: [
       'Подогреть 700 мл молока до 30–35 °C.',
       'Смешать молоко с 40 г сахара.',
