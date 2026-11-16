@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Поварня
+Comment=Поиск и конструктор рецептов
+Exec=povarnya
+Icon=povarnya
+Terminal=true
+StartupNotify=true
+StartupWMClass=ru.shchukarevan.povarnya
+Categories=Utility;GTK;
