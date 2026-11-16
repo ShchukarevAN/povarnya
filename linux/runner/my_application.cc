@@ -76,7 +76,7 @@ static void set_povarnya_window_icon(GtkWindow* window) {
   }
   g_autofree gchar* executable_directory = g_path_get_dirname(executable);
   g_autofree gchar* icon_path = g_build_filename(
-      executable_directory, "data", "resources", "povarnya.svg", nullptr);
+      executable_directory, "data", "resources", "povarnya.png", nullptr);
   if (!gtk_window_set_icon_from_file(window, icon_path, &error)) {
     g_warning("Failed to load Povarnya application icon: %s", error->message);
   }
