@@ -187,7 +187,17 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
 
   bool get _usesDarkTheme => appPalette(_themeName).isDark;
 
+  // Для системной рамки важна только палитра, а не плотность полей.
   ThemeData get _activeTheme => appTheme(_themeName);
+
+  ThemeData _activeThemeFor(BoxConstraints constraints) {
+    // Плотная оболочка нужна только на узком портретном экране, когда
+    // пользователь заметно увеличил интерфейс. В остальных раскладках
+    // сохраняются исходные интервалы и зоны касания.
+    final useCompactInputs =
+        constraints.maxHeight > constraints.maxWidth && _scale >= 1.2;
+    return appTheme(_themeName, compactInputControls: useCompactInputs);
+  }
 
   @override
   void initState() {
@@ -420,136 +430,138 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Поварня',
-    debugShowCheckedModeBanner: false,
-    locale: const Locale('ru'),
-    localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    supportedLocales: const [Locale('ru')],
-    themeMode: _usesDarkTheme ? ThemeMode.dark : ThemeMode.light,
-    theme: _activeTheme,
-    darkTheme: _activeTheme,
-    home: Shortcuts(
-      shortcuts: {
-        SingleActivator(LogicalKeyboardKey.equal, control: true):
-            const _ZoomInIntent(),
-        SingleActivator(LogicalKeyboardKey.add, control: true):
-            const _ZoomInIntent(),
-        SingleActivator(LogicalKeyboardKey.numpadAdd, control: true):
-            const _ZoomInIntent(),
-        CharacterActivator('+', control: true): const _ZoomInIntent(),
-        SingleActivator(LogicalKeyboardKey.minus, control: true):
-            const _ZoomOutIntent(),
-        SingleActivator(LogicalKeyboardKey.numpadSubtract, control: true):
-            const _ZoomOutIntent(),
-        CharacterActivator('-', control: true): const _ZoomOutIntent(),
-      },
-      child: Actions(
-        actions: {
-          _ZoomInIntent: CallbackAction<_ZoomInIntent>(
-            onInvoke: (_) {
-              _changeScale(.1);
-              return null;
-            },
-          ),
-          _ZoomOutIntent: CallbackAction<_ZoomOutIntent>(
-            onInvoke: (_) {
-              _changeScale(-.1);
-              return null;
-            },
-          ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => MaterialApp(
+      title: 'Поварня',
+      debugShowCheckedModeBanner: false,
+      locale: const Locale('ru'),
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('ru')],
+      themeMode: _usesDarkTheme ? ThemeMode.dark : ThemeMode.light,
+      theme: _activeThemeFor(constraints),
+      darkTheme: _activeThemeFor(constraints),
+      home: Shortcuts(
+        shortcuts: {
+          SingleActivator(LogicalKeyboardKey.equal, control: true):
+              const _ZoomInIntent(),
+          SingleActivator(LogicalKeyboardKey.add, control: true):
+              const _ZoomInIntent(),
+          SingleActivator(LogicalKeyboardKey.numpadAdd, control: true):
+              const _ZoomInIntent(),
+          CharacterActivator('+', control: true): const _ZoomInIntent(),
+          SingleActivator(LogicalKeyboardKey.minus, control: true):
+              const _ZoomOutIntent(),
+          SingleActivator(LogicalKeyboardKey.numpadSubtract, control: true):
+              const _ZoomOutIntent(),
+          CharacterActivator('-', control: true): const _ZoomOutIntent(),
         },
-        child: Focus(
-          autofocus: true,
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: _onTouchPointerDown,
-            onPointerMove: _onTouchPointerMove,
-            onPointerUp: _onTouchPointerEnd,
-            onPointerCancel: _onTouchPointerEnd,
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent &&
-                  HardwareKeyboard.instance.isControlPressed &&
-                  event.scrollDelta.dy != 0) {
-                _changeScale(event.scrollDelta.dy < 0 ? .1 : -.1);
-              }
-            },
-            child: _ScaledViewport(
-              scale: _scale,
-              child: Stack(
-                key: _sceneKey,
-                children: [
-                  Positioned.fill(
-                    child: _isRecipeScreenOpen
-                        ? IgnorePointer(
-                            ignoring: !_recipeOpenContentVisible,
-                            child: AnimatedOpacity(
-                              key: const ValueKey('recipe-open-content'),
-                              duration: const Duration(milliseconds: 350),
-                              curve: Curves.easeOutCubic,
-                              opacity: _recipeOpenContentVisible ? 1 : 0,
-                              // Прозрачный экран остаётся в раскладке: его
-                              // текстовые якоря нужны летящей карточке.
-                              child: RecipeScreen(
-                                key: ValueKey(_selectedRecipe?.id),
-                                onClose: _returnToSearch,
-                                onRecipeSaved: _displaySavedRecipeNotice,
-                                onOpenSimilarRecipe: (recipe) => setState(() {
-                                  _shouldOpenRecipeEditor = false;
-                                  _selectedRecipe = recipe;
-                                }),
-                                onToggleTheme: _toggleTheme,
-                                themeLabel: _themeName,
-                                initialEditing: _shouldOpenRecipeEditor,
-                                initialRecipe: _selectedRecipe,
-                                // Окончательное дерево загружается до старта
-                                // полёта. Заголовок уже занимает место в раскладке,
-                                // но остаётся прозрачным, чтобы не мигать под
-                                // переходным текстом в этот короткий промежуток.
-                                hideEntranceTitle: _recipeOpenOrigin != null,
-                                entranceTitleAnchor: _recipeOpenTitleAnchor,
-                                entranceIngredientAnchors:
-                                    _recipeOpenIngredientAnchors,
-                                onEntranceReady: _startRecipeOpenTransition,
-                                revealRecipePhoto: _recipeOpenOrigin == null,
-                              ),
-                            ),
-                          )
-                        : RecipeSearchScreen(
-                            onCreateRecipe: () => setState(() {
-                              _shouldOpenRecipeEditor = true;
-                              _selectedRecipe = null;
-                              _isRecipeScreenOpen = true;
-                            }),
-                            onOpenRecipe: _openRecipe,
-                            onOpenRecipeWithTransition:
-                                _openRecipeWithTransition,
-                            onToggleTheme: _toggleTheme,
-                            themeLabel: _themeName,
-                          ),
-                  ),
-                  if (_recipeOpenOrigin case final origin?
-                      when _recipeOpenTransitionReady)
+        child: Actions(
+          actions: {
+            _ZoomInIntent: CallbackAction<_ZoomInIntent>(
+              onInvoke: (_) {
+                _changeScale(.1);
+                return null;
+              },
+            ),
+            _ZoomOutIntent: CallbackAction<_ZoomOutIntent>(
+              onInvoke: (_) {
+                _changeScale(-.1);
+                return null;
+              },
+            ),
+          },
+          child: Focus(
+            autofocus: true,
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _onTouchPointerDown,
+              onPointerMove: _onTouchPointerMove,
+              onPointerUp: _onTouchPointerEnd,
+              onPointerCancel: _onTouchPointerEnd,
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent &&
+                    HardwareKeyboard.instance.isControlPressed &&
+                    event.scrollDelta.dy != 0) {
+                  _changeScale(event.scrollDelta.dy < 0 ? .1 : -.1);
+                }
+              },
+              child: _ScaledViewport(
+                scale: _scale,
+                child: Stack(
+                  key: _sceneKey,
+                  children: [
                     Positioned.fill(
-                      child: _RecipeOpenTransition(
-                        key: ValueKey(_selectedRecipe?.id),
-                        recipe: _selectedRecipe!,
-                        origin: origin,
-                        titleTargetKey: _recipeOpenTitleAnchor,
-                        ingredientTargetKeys:
-                            _recipeOpenIngredientAnchors ?? const {},
-                        onRevealContent: _revealRecipeOpenContent,
-                        onFinished: _finishRecipeOpenTransition,
+                      child: _isRecipeScreenOpen
+                          ? IgnorePointer(
+                              ignoring: !_recipeOpenContentVisible,
+                              child: AnimatedOpacity(
+                                key: const ValueKey('recipe-open-content'),
+                                duration: const Duration(milliseconds: 350),
+                                curve: Curves.easeOutCubic,
+                                opacity: _recipeOpenContentVisible ? 1 : 0,
+                                // Прозрачный экран остаётся в раскладке: его
+                                // текстовые якоря нужны летящей карточке.
+                                child: RecipeScreen(
+                                  key: ValueKey(_selectedRecipe?.id),
+                                  onClose: _returnToSearch,
+                                  onRecipeSaved: _displaySavedRecipeNotice,
+                                  onOpenSimilarRecipe: (recipe) => setState(() {
+                                    _shouldOpenRecipeEditor = false;
+                                    _selectedRecipe = recipe;
+                                  }),
+                                  onToggleTheme: _toggleTheme,
+                                  themeLabel: _themeName,
+                                  initialEditing: _shouldOpenRecipeEditor,
+                                  initialRecipe: _selectedRecipe,
+                                  // Окончательное дерево загружается до старта
+                                  // полёта. Заголовок уже занимает место в раскладке,
+                                  // но остаётся прозрачным, чтобы не мигать под
+                                  // переходным текстом в этот короткий промежуток.
+                                  hideEntranceTitle: _recipeOpenOrigin != null,
+                                  entranceTitleAnchor: _recipeOpenTitleAnchor,
+                                  entranceIngredientAnchors:
+                                      _recipeOpenIngredientAnchors,
+                                  onEntranceReady: _startRecipeOpenTransition,
+                                  revealRecipePhoto: _recipeOpenOrigin == null,
+                                ),
+                              ),
+                            )
+                          : RecipeSearchScreen(
+                              onCreateRecipe: () => setState(() {
+                                _shouldOpenRecipeEditor = true;
+                                _selectedRecipe = null;
+                                _isRecipeScreenOpen = true;
+                              }),
+                              onOpenRecipe: _openRecipe,
+                              onOpenRecipeWithTransition:
+                                  _openRecipeWithTransition,
+                              onToggleTheme: _toggleTheme,
+                              themeLabel: _themeName,
+                            ),
+                    ),
+                    if (_recipeOpenOrigin case final origin?
+                        when _recipeOpenTransitionReady)
+                      Positioned.fill(
+                        child: _RecipeOpenTransition(
+                          key: ValueKey(_selectedRecipe?.id),
+                          recipe: _selectedRecipe!,
+                          origin: origin,
+                          titleTargetKey: _recipeOpenTitleAnchor,
+                          ingredientTargetKeys:
+                              _recipeOpenIngredientAnchors ?? const {},
+                          onRevealContent: _revealRecipeOpenContent,
+                          onFinished: _finishRecipeOpenTransition,
+                        ),
                       ),
-                    ),
-                  if (_showSavedRecipeNotice)
-                    const Positioned(
-                      right: 24,
-                      // Над плавающей кнопкой «Создать рецепт».
-                      bottom: 96,
-                      child: _SavedRecipeNotice(),
-                    ),
-                ],
+                    if (_showSavedRecipeNotice)
+                      const Positioned(
+                        right: 24,
+                        // Над плавающей кнопкой «Создать рецепт».
+                        bottom: 96,
+                        child: _SavedRecipeNotice(),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

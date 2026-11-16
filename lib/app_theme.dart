@@ -5,16 +5,16 @@ const appThemeNames = ['Бежевая', 'Коричневая', 'OLED', 'Све
 
 const defaultAppThemeName = 'Светлая';
 
-/// Единые метрики для всех строк ввода. Значения не зависят от конкретного
-/// экрана, поэтому поиск, числовые параметры и обычные поля не расходятся по
-/// толщине контура, кеглю и внутреннему воздуху.
+/// Единые метрики для всех строк ввода.
 const povarnyaInputBorderWidth = 1.0;
 const povarnyaInputHorizontalPadding = 10.0;
-// Кегль остаётся прежним; уменьшается только свободная оболочка строки.
-const povarnyaInputVerticalPadding = 3.0;
+const povarnyaInputVerticalPadding = 7.0;
 const povarnyaInputFontSize = 16.0;
-const povarnyaInputIconExtent = 34.0;
-const povarnyaSearchBarHeight = 34.0;
+const povarnyaInputIconExtent = 48.0;
+const povarnyaSearchBarHeight = 42.0;
+const povarnyaCompactInputVerticalPadding = 3.0;
+const povarnyaCompactInputIconExtent = 34.0;
+const povarnyaCompactSearchBarHeight = 34.0;
 
 bool isKnownAppThemeName(String value) => appThemeNames.contains(value);
 
@@ -221,8 +221,17 @@ const _palettes = <String, PovarnyaPalette>{
 PovarnyaPalette appPalette(String themeName) =>
     _palettes[themeName] ?? _palettes[defaultAppThemeName]!;
 
-ThemeData appTheme(String themeName) {
+ThemeData appTheme(String themeName, {bool compactInputControls = false}) {
   final palette = appPalette(themeName);
+  final inputVerticalPadding = compactInputControls
+      ? povarnyaCompactInputVerticalPadding
+      : povarnyaInputVerticalPadding;
+  final inputIconExtent = compactInputControls
+      ? povarnyaCompactInputIconExtent
+      : povarnyaInputIconExtent;
+  final searchBarHeight = compactInputControls
+      ? povarnyaCompactSearchBarHeight
+      : povarnyaSearchBarHeight;
   final inputBorder = OutlineInputBorder(
     borderRadius: BorderRadius.circular(10),
     borderSide: BorderSide(
@@ -238,20 +247,17 @@ ThemeData appTheme(String themeName) {
     scaffoldBackgroundColor: palette.surface,
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
-      contentPadding: const EdgeInsets.symmetric(
+      contentPadding: EdgeInsets.symmetric(
         horizontal: povarnyaInputHorizontalPadding,
-        vertical: povarnyaInputVerticalPadding,
+        vertical: inputVerticalPadding,
       ),
-      // Стандартные 48 dp для Material-иконок были рассчитаны на крупные
-      // сенсорные поля. Для компактных строк поиска их заменяет общая
-      // 34-пиксельная оболочка, не меняющая кегль текста.
-      prefixIconConstraints: const BoxConstraints.tightFor(
-        width: povarnyaInputIconExtent,
-        height: povarnyaInputIconExtent,
+      prefixIconConstraints: BoxConstraints.tightFor(
+        width: inputIconExtent,
+        height: inputIconExtent,
       ),
-      suffixIconConstraints: const BoxConstraints.tightFor(
-        width: povarnyaInputIconExtent,
-        height: povarnyaInputIconExtent,
+      suffixIconConstraints: BoxConstraints.tightFor(
+        width: inputIconExtent,
+        height: inputIconExtent,
       ),
       border: inputBorder,
       enabledBorder: inputBorder,
@@ -275,7 +281,7 @@ ThemeData appTheme(String themeName) {
       ),
     ),
     searchBarTheme: SearchBarThemeData(
-      constraints: const BoxConstraints(minHeight: povarnyaSearchBarHeight),
+      constraints: BoxConstraints(minHeight: searchBarHeight),
       padding: const WidgetStatePropertyAll(
         EdgeInsets.symmetric(horizontal: povarnyaInputHorizontalPadding),
       ),
