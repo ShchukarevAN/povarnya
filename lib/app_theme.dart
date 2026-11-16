@@ -10,9 +10,11 @@ const defaultAppThemeName = 'Светлая';
 /// толщине контура, кеглю и внутреннему воздуху.
 const povarnyaInputBorderWidth = 1.0;
 const povarnyaInputHorizontalPadding = 10.0;
-const povarnyaInputVerticalPadding = 7.0;
+// Кегль остаётся прежним; уменьшается только свободная оболочка строки.
+const povarnyaInputVerticalPadding = 3.0;
 const povarnyaInputFontSize = 16.0;
-const povarnyaSearchBarHeight = 42.0;
+const povarnyaInputIconExtent = 34.0;
+const povarnyaSearchBarHeight = 34.0;
 
 bool isKnownAppThemeName(String value) => appThemeNames.contains(value);
 
@@ -239,6 +241,17 @@ ThemeData appTheme(String themeName) {
       contentPadding: const EdgeInsets.symmetric(
         horizontal: povarnyaInputHorizontalPadding,
         vertical: povarnyaInputVerticalPadding,
+      ),
+      // Стандартные 48 dp для Material-иконок были рассчитаны на крупные
+      // сенсорные поля. Для компактных строк поиска их заменяет общая
+      // 34-пиксельная оболочка, не меняющая кегль текста.
+      prefixIconConstraints: const BoxConstraints.tightFor(
+        width: povarnyaInputIconExtent,
+        height: povarnyaInputIconExtent,
+      ),
+      suffixIconConstraints: const BoxConstraints.tightFor(
+        width: povarnyaInputIconExtent,
+        height: povarnyaInputIconExtent,
       ),
       border: inputBorder,
       enabledBorder: inputBorder,

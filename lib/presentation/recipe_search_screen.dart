@@ -333,6 +333,12 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                       ),
                       suffixIcon: IconButton(
                         key: const ValueKey('recipe-order-toggle'),
+                        constraints: const BoxConstraints.tightFor(
+                          width: povarnyaInputIconExtent,
+                          height: povarnyaInputIconExtent,
+                        ),
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
                         tooltip: _randomOrder
                             ? 'Случайный порядок: включён'
                             : 'Алфавитный порядок: включён',
@@ -472,6 +478,12 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
             prefixIcon: const Icon(Icons.search),
             labelText: 'Найти ингредиент',
             suffixIcon: IconButton(
+              constraints: const BoxConstraints.tightFor(
+                width: povarnyaInputIconExtent,
+                height: povarnyaInputIconExtent,
+              ),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
               tooltip: _compactFilterIngredients
                   ? 'Показывать названия ингредиентов'
                   : 'Показывать пиктограммы ингредиентов',
