@@ -1,3 +1,4 @@
+import 'catalog.dart';
 import 'recipe_node.dart';
 
 /// Видимый фрагмент строки рецепта. [nodeId] связывает текст конкретного
@@ -249,10 +250,17 @@ class RecipeRenderer {
     final eggCategory = node.card.id == 'ingredient.eggs'
         ? node.text?.trim() ?? ''
         : '';
+    final pinch = _pinchPhrase(
+      node,
+      servings: servings,
+      recipeMultiplier: recipeMultiplier,
+      grammarCase: caseOverride ?? node.caseFromParent,
+    );
     final ownText = StringBuffer(
-      isParameter
-          ? ''
-          : '${node.card.formFor(caseOverride ?? node.caseFromParent)}${eggCategory.isEmpty ? '' : ' $eggCategory'}',
+      pinch ??
+          (isParameter
+              ? ''
+              : '${node.card.formFor(caseOverride ?? node.caseFromParent)}${eggCategory.isEmpty ? '' : ' $eggCategory'}'),
     );
     if (node.value != null && node.unit != null) {
       if (node.unit == NumericUnit.minutes) {
@@ -297,6 +305,14 @@ class RecipeRenderer {
     int recipeMultiplier,
   ) {
     for (final child in node.children) {
+      if (_isPinchMass(
+        node,
+        child,
+        servings: servings,
+        recipeMultiplier: recipeMultiplier,
+      )) {
+        continue;
+      }
       final childParts = renderParts(
         child,
         servings: servings,
@@ -340,6 +356,64 @@ class RecipeRenderer {
       2 || 3 || 4 => 'минуты',
       _ => 'минут',
     };
+  }
+
+  bool _isPinchMass(
+    RecipeNode ingredient,
+    RecipeNode child, {
+    required int servings,
+    required int recipeMultiplier,
+  }) =>
+      ingredient.card.kind == CardKind.ingredient &&
+      (CatalogCards.ingredientGroupIds[IngredientGroup.spices] ?? const {})
+          .contains(ingredient.card.id) &&
+      child.card.id == 'quantity.mass' &&
+      child.value != null &&
+      recipeMultiplier > 0 &&
+      (child.value! * servings / recipeMultiplier).round() == 0;
+
+  String? _pinchPhrase(
+    RecipeNode node, {
+    required int servings,
+    required int recipeMultiplier,
+    required GrammarCase grammarCase,
+  }) {
+    final mass = node.children.where(
+      (child) => _isPinchMass(
+        node,
+        child,
+        servings: servings,
+        recipeMultiplier: recipeMultiplier,
+      ),
+    );
+    if (mass.isEmpty) return null;
+    final ingredient = switch (node.card.id) {
+      'ingredient.salt' => 'соли',
+      'ingredient.sugar' => 'сахара',
+      'ingredient.black-pepper' => 'чёрного молотого перца',
+      'ingredient.bay-leaf' => 'лаврового листа',
+      'ingredient.dill' => 'укропа',
+      'ingredient.parsley' => 'петрушки',
+      'ingredient.green-onion' => 'зелёного лука',
+      'ingredient.garlic' => 'чеснока',
+      'ingredient.sweet-paprika' => 'сладкой паприки',
+      'ingredient.mustard' => 'горчицы',
+      'ingredient.coriander' => 'кориандра',
+      'ingredient.cumin' => 'тмина',
+      'ingredient.cloves' => 'гвоздики',
+      'ingredient.cinnamon' => 'корицы',
+      'ingredient.vanilla' => 'ванили',
+      _ => node.card.nominative.toLowerCase(),
+    };
+    final pinch = switch (grammarCase) {
+      GrammarCase.accusative => 'щепотку',
+      GrammarCase.genitive => 'щепотки',
+      GrammarCase.dative => 'щепотке',
+      GrammarCase.instrumental => 'щепоткой',
+      GrammarCase.prepositional => 'щепотке',
+      _ => 'щепотка',
+    };
+    return '$pinch $ingredient';
   }
 
   /// Числовые количества масштабируются на отношение выбранных и базовых

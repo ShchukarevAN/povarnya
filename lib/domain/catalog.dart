@@ -5,7 +5,7 @@ import 'recipe_node.dart';
 /// Изменяется только при изменении данных каталога. По ней локальная БД
 /// понимает, что нужно один раз синхронизировать встроенные записи, вместо
 /// полного удаления и создания каталога при каждом запуске приложения.
-const catalogRevision = 'catalog-v12';
+const catalogRevision = 'catalog-v13';
 
 /// Раздел блюда в каталоге. Значение [storageKey] хранится в локальной БД,
 /// а [title] показывается в поиске и выборе на экране рецепта.
@@ -1612,6 +1612,18 @@ class CatalogCards {
     kind: CardKind.text,
     nominative: 'Само блюдо',
   );
+  static const preparation = CardDefinition(
+    id: 'text.preparation',
+    kind: CardKind.text,
+    nominative: 'Заготовка',
+    forms: {
+      GrammarCase.genitive: 'заготовки',
+      GrammarCase.dative: 'заготовке',
+      GrammarCase.accusative: 'заготовку',
+      GrammarCase.instrumental: 'заготовкой',
+      GrammarCase.prepositional: 'заготовке',
+    },
+  );
   static const all = [
     prepare,
     cut,
@@ -1792,6 +1804,7 @@ class CatalogCards {
     servingPlate,
     freeText,
     recipeDish,
+    preparation,
   ];
 
   /// Быстрый словарь для восстановления дерева рецепта из SQLite.

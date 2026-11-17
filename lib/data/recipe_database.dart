@@ -38,7 +38,6 @@ class RecipeDatabase {
     );
     await _ensureSchemaCompatibility(_database!);
     await _migrateLegacyCatalogRecipeIds(_database!);
-    await _deleteRecipesWithoutIdsOnce(_database!);
     final rows = await _database!.rawQuery(
       'SELECT COUNT(*) AS count FROM document_root',
     );
@@ -228,33 +227,6 @@ class RecipeDatabase {
         );
       });
     }
-  }
-
-  /// Однократная санитарная очистка старых черновых строк без ключа.
-  Future<void> _deleteRecipesWithoutIdsOnce(Database database) async {
-    const key = 'removed_recipes_without_id_v1';
-    final present = await database.query(
-      'app_metadata',
-      where: 'key = ?',
-      whereArgs: [key],
-      limit: 1,
-    );
-    if (present.isNotEmpty) return;
-    await database.transaction((transaction) async {
-      await transaction.delete(
-        'node',
-        where: "root_id IS NULL OR trim(root_id) = ''",
-      );
-      await transaction.delete(
-        'recipe_photo',
-        where: "recipe_id IS NULL OR trim(recipe_id) = ''",
-      );
-      await transaction.delete(
-        'document_root',
-        where: "id IS NULL OR trim(id) = ''",
-      );
-      await transaction.insert('app_metadata', {'key': key, 'value': '1'});
-    });
   }
 
   int _todayKey([DateTime? now]) {

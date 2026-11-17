@@ -321,7 +321,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                   padding: EdgeInsets.all(compactVertical ? 8 : 24),
                   children: [
                     Text(
-                      'Поиск рецептов',
+                      'Поиск лакомств',
                       style: Theme.of(context).textTheme.headlineMedium
                           ?.copyWith(
                             color: Theme.of(context).colorScheme.primary,
@@ -340,7 +340,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                           Icons.search,
                           color: Theme.of(context).colorScheme.primary,
                         ),
-                        labelText: 'Название рецепта',
+                        labelText: 'Название лакомства',
                         labelStyle: TextStyle(
                           color: Theme.of(context)
                               .colorScheme

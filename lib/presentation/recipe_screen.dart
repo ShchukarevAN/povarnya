@@ -429,6 +429,21 @@ bool canAddStep(CardDefinition card) =>
 GrammarCase grammarCaseFor(RecipeNode parent, CardDefinition child) =>
     grammarCaseForChild(parent, RecipeNode(id: 'preview', card: child));
 
+/// В редакторе запятая или «и» — самостоятельный элемент между карточками,
+/// а не часть текста следующего ингредиента. Так структура модуля остаётся
+/// чистой, а пунктуация совпадает с режимом просмотра.
+bool _showsIngredientEnumeration(RecipeNode parent, RecipeNode child) {
+  if (parent.card.id == 'action.wrap' ||
+      child.card.kind != CardKind.ingredient ||
+      joinTextForChild(parent, child) != null) {
+    return false;
+  }
+  final ingredients = parent.children
+      .where((item) => item.card.kind == CardKind.ingredient)
+      .toList();
+  return ingredients.length > 1 && ingredients.indexOf(child) > 0;
+}
+
 class RecipeScreen extends StatefulWidget {
   const RecipeScreen({
     super.key,
@@ -2986,26 +3001,32 @@ class _RecipeCategoryPicker extends StatelessWidget {
   final ValueChanged<RecipeCategory> onChanged;
 
   @override
-  Widget build(BuildContext context) => DropdownButtonFormField<RecipeCategory>(
-    key: ValueKey('recipe-category-picker-${value.storageKey}'),
-    initialValue: value,
-    isExpanded: true,
-    style: const TextStyle(fontSize: 17),
-    decoration: const InputDecoration(
-      labelText: 'Категория блюда',
-      isDense: true,
-    ),
-    items: [
-      for (final category in RecipeCategory.values)
-        DropdownMenuItem(
-          value: category,
-          child: Text(category.title, style: const TextStyle(fontSize: 17)),
-        ),
-    ],
-    onChanged: (category) {
-      if (category != null) onChanged(category);
-    },
-  );
+  Widget build(BuildContext context) {
+    final foreground = contrastColorFor(Theme.of(context).colorScheme.surface);
+    final style = TextStyle(fontSize: 17, color: foreground);
+    return DropdownButtonFormField<RecipeCategory>(
+      key: ValueKey('recipe-category-picker-${value.storageKey}'),
+      initialValue: value,
+      isExpanded: true,
+      style: style,
+      iconEnabledColor: foreground,
+      decoration: InputDecoration(
+        labelText: 'Категория блюда',
+        labelStyle: TextStyle(color: foreground),
+        isDense: true,
+      ),
+      items: [
+        for (final category in RecipeCategory.values)
+          DropdownMenuItem(
+            value: category,
+            child: Text(category.title, style: style),
+          ),
+      ],
+      onChanged: (category) {
+        if (category != null) onChanged(category);
+      },
+    );
+  }
 }
 
 /// Выбор постности не заменяет основную категорию: он лишь добавляет второй
@@ -3017,23 +3038,32 @@ class _RecipeFastingPicker extends StatelessWidget {
   final ValueChanged<RecipeFasting> onChanged;
 
   @override
-  Widget build(BuildContext context) => DropdownButtonFormField<RecipeFasting>(
-    key: ValueKey('recipe-fasting-picker-${value.storageKey}'),
-    initialValue: value,
-    isExpanded: true,
-    style: const TextStyle(fontSize: 17),
-    decoration: const InputDecoration(labelText: 'Питание', isDense: true),
-    items: [
-      for (final fasting in RecipeFasting.values)
-        DropdownMenuItem(
-          value: fasting,
-          child: Text(fasting.title, style: const TextStyle(fontSize: 17)),
-        ),
-    ],
-    onChanged: (fasting) {
-      if (fasting != null) onChanged(fasting);
-    },
-  );
+  Widget build(BuildContext context) {
+    final foreground = contrastColorFor(Theme.of(context).colorScheme.surface);
+    final style = TextStyle(fontSize: 17, color: foreground);
+    return DropdownButtonFormField<RecipeFasting>(
+      key: ValueKey('recipe-fasting-picker-${value.storageKey}'),
+      initialValue: value,
+      isExpanded: true,
+      style: style,
+      iconEnabledColor: foreground,
+      decoration: InputDecoration(
+        labelText: 'Питание',
+        labelStyle: TextStyle(color: foreground),
+        isDense: true,
+      ),
+      items: [
+        for (final fasting in RecipeFasting.values)
+          DropdownMenuItem(
+            value: fasting,
+            child: Text(fasting.title, style: style),
+          ),
+      ],
+      onChanged: (fasting) {
+        if (fasting != null) onChanged(fasting);
+      },
+    );
+  }
 }
 
 /// Короткая кулинарная памятка намеренно хранится в интерфейсе: это не
@@ -3284,6 +3314,11 @@ class _TreeEditor extends StatelessWidget {
               onDrop: onDrop,
               compact: compactLayout,
             ),
+            if (_showsIngredientEnumeration(node, entry.$2))
+              _EditorEnumerationSeparator(
+                text: separatorForChild(node, entry.$2).trim(),
+                color: contrastColorFor(moduleColor(context, node.card.kind)),
+              ),
             _TreeEditor(
               node: entry.$2,
               source: node.children,
@@ -3339,12 +3374,10 @@ class _NodeBody extends StatelessWidget {
       final grammarCase = parent == null
           ? node.caseFromParent
           : grammarCaseForChild(parent!, node);
-      final prefix = parent == null ? null : separatorForChild(parent!, node);
+      final prefix = parent == null ? null : joinTextForChild(parent!, node);
       final label = node.card.formFor(grammarCase);
       if (prefix == null || prefix.trim().isEmpty) return label;
-      final hasVisiblePrefix =
-          joinTextForChild(parent!, node) != null || siblingIndex > 0;
-      return hasVisiblePrefix ? '${prefix.trim()} $label' : label;
+      return '${prefix.trim()} $label';
     }
     final unit = node.unit == NumericUnit.grams
         ? 'г'
@@ -3464,6 +3497,21 @@ class _NodeBody extends StatelessWidget {
       ),
     );
   }
+}
+
+class _EditorEnumerationSeparator extends StatelessWidget {
+  const _EditorEnumerationSeparator({required this.text, required this.color});
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 1),
+    child: Text(
+      text,
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(color: color),
+    ),
+  );
 }
 
 /// Показывает точку, в которой отпущенный модуль станет последним вложением.
@@ -3948,11 +3996,11 @@ class _InsertZone extends StatelessWidget {
       width: parent == null
           ? double.infinity
           : candidates.isEmpty
-          ? 8
+          ? 18
           : 80,
       // В компактном дереве это остаётся областью приёма, но не занимает
       // зрительно целую строку до и после каждого вложения.
-      height: candidates.isEmpty ? (compact ? 4 : 24) : 34,
+      height: candidates.isEmpty ? (compact ? 8 : 28) : 34,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: candidates.isEmpty
