@@ -5,7 +5,7 @@ import 'recipe_node.dart';
 /// Изменяется только при изменении данных каталога. По ней локальная БД
 /// понимает, что нужно один раз синхронизировать встроенные записи, вместо
 /// полного удаления и создания каталога при каждом запуске приложения.
-const catalogRevision = 'catalog-v13';
+const catalogRevision = 'catalog-v14';
 
 /// Раздел блюда в каталоге. Значение [storageKey] хранится в локальной БД,
 /// а [title] показывается в поиске и выборе на экране рецепта.
@@ -157,11 +157,12 @@ class CatalogRecipe {
   CatalogRecipe({
     required String id,
     required this.title,
-    required this.buildSteps,
+    required List<RecipeNode> Function() buildSteps,
     this.servings = 2,
     this.detailedSteps = const [],
   }) : catalogKey = id,
-       id = _catalogRecipeId(id);
+       id = _catalogRecipeId(id),
+       _sourceBuildSteps = buildSteps;
 
   /// Неизменяемый ключ встроенного каталога. Он нужен только для миграции
   /// старых баз и сопоставления исходников, но никогда не показывается в UI.
@@ -171,7 +172,13 @@ class CatalogRecipe {
   /// составом или порциями и остаётся тем же после пользовательской правки.
   final String id;
   final String title;
-  final List<RecipeNode> Function() buildSteps;
+  final List<RecipeNode> Function() _sourceBuildSteps;
+
+  /// Некоторые рецепты восстановлены из проверенных пользовательских
+  /// модульных деревьев. Для остальных остаётся исходное описание рядом с
+  /// записью каталога.
+  List<RecipeNode> Function() get buildSteps =>
+      _recipeBuildOverrides[catalogKey] ?? _sourceBuildSteps;
 
   /// Исходное число порций и начальное значение множителя рецепта.
   final int servings;
@@ -4910,7 +4917,7 @@ final catalogRecipes = <CatalogRecipe>[
   ),
   CatalogRecipe(
     id: 'buckwheat-pudding-apples',
-    title: 'Крупник с яблоками',
+    title: 'Крупеник с яблоками',
     detailedSteps: [
       'Включить мультиварку Moulinex CE5A0FF2.',
       'Очистить 1–2 яблока, нарезать кубиками, прогреть 4–5 минут и остудить.',
@@ -6507,4 +6514,178 @@ final catalogRecipes = <CatalogRecipe>[
       ]),
     ],
   ),
+];
+
+/// Варианты, восстановленные из локальной БД после ручной модульной правки.
+/// Они заменяют только встроенные деревья, поэтому после синхронизации станут
+/// исходными и для новых установок, и для неотредактированных рецептов.
+final _recipeBuildOverrides = <String, List<RecipeNode> Function()>{
+  'buckwheat-pudding-apples': _restoredKrupenikSteps,
+  'curd-casserole-apples': _restoredAppleCottageCasseroleSteps,
+};
+
+List<RecipeNode> _restoredKrupenikSteps() => [
+  _node('kr-0-boil', CatalogCards.boil, [
+    _ingredient('kr-0-buckwheat', CatalogCards.buckwheat, [
+      _mass('kr-0-buckwheat-mass', 400),
+    ]),
+  ]),
+  _node('kr-0-cool', CatalogCards.cool, [
+    _ingredient('kr-0-cool-buckwheat', CatalogCards.buckwheat),
+  ]),
+  _node('kr-1', CatalogCards.mix, [
+    _ingredient('kr-1-buckwheat', CatalogCards.buckwheat),
+    _ingredient('kr-1-cottage-cheese', CatalogCards.cottageCheese, [
+      _mass('kr-1-cottage-cheese-mass', 400),
+    ]),
+    _ingredient('kr-1-eggs', CatalogCards.eggs, [
+      RecipeNode(
+        id: 'kr-1-eggs-count',
+        card: CatalogCards.count,
+        value: 3,
+        unit: NumericUnit.pieces,
+      ),
+    ]),
+    _ingredient('kr-1-sour-cream', CatalogCards.sourCream, [
+      RecipeNode(
+        id: 'kr-1-sour-cream-fat',
+        card: CatalogCards.fatContent,
+        value: 15,
+        unit: NumericUnit.percent,
+      ),
+      _mass('kr-1-sour-cream-mass', 70),
+    ]),
+    _ingredient('kr-1-sugar', CatalogCards.sugar, [
+      _mass('kr-1-sugar-mass', 55),
+    ]),
+    _ingredient('kr-1-salt', CatalogCards.salt, [_mass('kr-1-salt-mass', 1)]),
+    _ingredient('kr-1-flour', CatalogCards.flour, [
+      _mass('kr-1-flour-mass', 35),
+    ]),
+  ]),
+  _node('kr-2-clean', CatalogCards.clean, [
+    _ingredient('kr-2-clean-apples', CatalogCards.apples, [
+      _mass('kr-2-apples-mass', 200),
+    ]),
+  ]),
+  _node('kr-2-cut', CatalogCards.cut, [
+    _ingredient('kr-2-apples', CatalogCards.apples, [
+      RecipeNode(id: 'kr-2-shape', card: CatalogCards.shape, text: 'кубиками'),
+    ]),
+  ]),
+  _node('kr-3-heat', CatalogCards.heat, [
+    RecipeNode(id: 'kr-3-pan', card: CatalogCards.fryingPan),
+    _ingredient('kr-3-apples', CatalogCards.apples),
+    _time('kr-3-time', 4, 5),
+  ]),
+  _node('kr-4-add', CatalogCards.add, [
+    _ingredient('kr-4-apples', CatalogCards.apples),
+    _ingredient('kr-4-cinnamon', CatalogCards.cinnamon, [
+      RecipeNode(
+        id: 'kr-4-cinnamon-spoon',
+        card: CatalogCards.spoon,
+        text: '½ ч. л.',
+      ),
+    ]),
+    RecipeNode(id: 'kr-4-preparation', card: CatalogCards.preparation),
+  ]),
+  _node('kr-5-grease', CatalogCards.grease, [
+    RecipeNode(id: 'kr-5-multicooker', card: CatalogCards.multicooker),
+    _ingredient('kr-5-butter', CatalogCards.butter, [
+      _mass('kr-5-butter-mass', 15),
+    ]),
+  ]),
+  _node('kr-5-plate', CatalogCards.plate, [
+    RecipeNode(id: 'kr-5-preparation', card: CatalogCards.preparation),
+    RecipeNode(id: 'kr-5-plate-multicooker', card: CatalogCards.multicooker),
+  ]),
+  _multicookerStep('kr-6', 'Выпечка', 50),
+  _node('kr-7-leave', CatalogCards.leave, [
+    RecipeNode(
+      id: 'kr-7-dish',
+      card: CatalogCards.recipeDish,
+      text: 'Крупеник с яблоками',
+    ),
+    _time('kr-7-time', 15, 20),
+  ]),
+];
+
+List<RecipeNode> _restoredAppleCottageCasseroleSteps() => [
+  _node('zap-0-clean', CatalogCards.clean, [
+    _ingredient('zap-0-apples', CatalogCards.apples, [
+      _mass('zap-0-apples-mass', 275),
+    ]),
+  ]),
+  _node('zap-1-cut', CatalogCards.cut, [
+    _ingredient('zap-1-apples', CatalogCards.apples, [
+      RecipeNode(id: 'zap-1-shape', card: CatalogCards.shape, text: 'кубиками'),
+    ]),
+  ]),
+  _node('zap-2-heat', CatalogCards.heat, [
+    _ingredient('zap-2-apples', CatalogCards.apples),
+    _time('zap-2-time', 4, 5),
+    RecipeNode(id: 'zap-2-pan', card: CatalogCards.fryingPan),
+  ]),
+  _node('zap-3-mix', CatalogCards.mix, [
+    _ingredient('zap-3-eggs', CatalogCards.eggs, [
+      RecipeNode(
+        id: 'zap-3-eggs-count',
+        card: CatalogCards.count,
+        value: 3,
+        unit: NumericUnit.pieces,
+      ),
+    ]),
+    _ingredient('zap-3-sugar', CatalogCards.sugar, [
+      _mass('zap-3-sugar-mass', 70),
+    ]),
+    _ingredient('zap-3-salt', CatalogCards.salt, [_mass('zap-3-salt-mass', 1)]),
+  ]),
+  _node('zap-3-whisk', CatalogCards.whisk, [
+    RecipeNode(id: 'zap-3-whisk-tool', card: CatalogCards.whisk),
+  ]),
+  _node('zap-3-add', CatalogCards.add, [
+    _ingredient('zap-3-cottage-cheese', CatalogCards.cottageCheese, [
+      _mass('zap-3-cottage-cheese-mass', 600),
+    ]),
+    _ingredient('zap-3-sour-cream', CatalogCards.sourCream, [
+      _mass('zap-3-sour-cream-mass', 70),
+    ]),
+    _ingredient('zap-3-cinnamon', CatalogCards.cinnamon, [
+      RecipeNode(
+        id: 'zap-3-cinnamon-spoon',
+        card: CatalogCards.spoon,
+        text: '½ ч. л.',
+      ),
+    ]),
+  ]),
+  _node('zap-3-stir', CatalogCards.stir),
+  _node('zap-4-sift', CatalogCards.sift, [
+    _ingredient('zap-4-flour', CatalogCards.flour, [
+      _mass('zap-4-flour-mass', 55),
+    ]),
+    _ingredient('zap-4-baking-powder', CatalogCards.bakingPowder, [
+      RecipeNode(
+        id: 'zap-4-baking-powder-spoon',
+        card: CatalogCards.spoon,
+        text: '1 ч. л.',
+      ),
+    ]),
+  ]),
+  _node('zap-4-add', CatalogCards.add, [
+    _ingredient('zap-4-flour', CatalogCards.flour),
+    _ingredient('zap-4-apples', CatalogCards.apples),
+    _text('zap-4-text', 'в творожную массу'),
+  ]),
+  _node('zap-4-stir', CatalogCards.stir),
+  _node('zap-5-grease', CatalogCards.grease, [
+    RecipeNode(id: 'zap-5-multicooker', card: CatalogCards.multicooker),
+    _ingredient('zap-5-butter', CatalogCards.butter, [
+      _mass('zap-5-butter-mass', 15),
+    ]),
+  ]),
+  _multicookerStep('zap-6', 'Выпечка', 60),
+  _node('zap-7-leave', CatalogCards.leave, [
+    _ingredient('zap-7-cottage-cheese', CatalogCards.cottageCheese),
+    _time('zap-7-time', 15),
+  ]),
 ];
