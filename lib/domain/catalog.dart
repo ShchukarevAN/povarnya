@@ -5,7 +5,7 @@ import 'recipe_node.dart';
 /// Изменяется только при изменении данных каталога. По ней локальная БД
 /// понимает, что нужно один раз синхронизировать встроенные записи, вместо
 /// полного удаления и создания каталога при каждом запуске приложения.
-const catalogRevision = 'catalog-v9';
+const catalogRevision = 'catalog-v10';
 
 /// Раздел блюда в каталоге. Значение [storageKey] хранится в локальной БД,
 /// а [title] показывается в поиске и выборе на экране рецепта.
@@ -695,6 +695,11 @@ class CatalogCards {
     id: 'action.wrap',
     kind: CardKind.action,
     nominative: 'Завернуть',
+  );
+  static const continueCooking = CardDefinition(
+    id: 'action.continue',
+    kind: CardKind.action,
+    nominative: 'Продолжать',
   );
   static const chickenFillet = CardDefinition(
     id: 'ingredient.chicken-fillet',
@@ -1608,6 +1613,7 @@ class CatalogCards {
     coat,
     pinch,
     wrap,
+    continueCooking,
     chickenFillet,
     pearlBarley,
     pickledCucumbers,

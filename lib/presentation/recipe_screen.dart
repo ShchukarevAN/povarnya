@@ -156,6 +156,7 @@ IconData actionIcon(String id) => switch (id) {
   'action.coat' => Icons.grain_outlined,
   'action.pinch' => Icons.pan_tool_outlined,
   'action.wrap' => Icons.wrap_text_outlined,
+  'action.continue' => Icons.more_time_outlined,
   _ => Icons.restaurant_menu,
 };
 
@@ -310,6 +311,12 @@ IconData cardIcon(CardDefinition card) {
 }
 
 bool _hasAllowedChildKind(RecipeNode parent, CardDefinition child) {
+  if (parent.card.id == 'action.continue') {
+    return child.kind == CardKind.action;
+  }
+  if (parent.card.id == 'action.wrap') {
+    return child.kind == CardKind.ingredient || child.kind == CardKind.text;
+  }
   if (parent.card.id == 'utensil.moulinex-ce5a0ff2') {
     return child.id == 'utensil.multicooker-program';
   }
@@ -345,18 +352,35 @@ bool _allowsQuantity(CardDefinition ingredient, CardDefinition quantity) {
   return quantity.id == 'quantity.mass' || quantity.id == 'quantity.volume';
 }
 
-bool canAddChild(RecipeNode parent, CardDefinition child) {
+/// Единое правило для новой карточки и уже вставленного модуля. При переносе
+/// [movingNode] предварительно исключается из целевого списка: одинаковые
+/// условия работают для всех зон вставки и не зависят от позиции в строке.
+bool canAddChild(
+  RecipeNode parent,
+  CardDefinition child, {
+  RecipeNode? movingNode,
+}) {
+  final existing = parent.children
+      .where((item) => !identical(item, movingNode))
+      .toList(growable: false);
+  if (parent.card.id == 'action.continue') {
+    return child.kind == CardKind.action && existing.isEmpty;
+  }
+  if (parent.card.id == 'action.wrap') {
+    return (child.kind == CardKind.ingredient || child.kind == CardKind.text) &&
+        existing.length < 2;
+  }
   if (parent.card.id == 'ingredient.canned' &&
       child.kind == CardKind.ingredient) {
     return child.id != parent.card.id &&
-        !parent.children.any((item) => item.card.kind == CardKind.ingredient);
+        !existing.any((item) => item.card.kind == CardKind.ingredient);
   }
   // У ингредиента может быть только одно количество: либо масса, либо объём.
   if ((child.id == 'quantity.mass' ||
           child.id == 'quantity.volume' ||
           child.id == 'quantity.count' ||
           child.id == 'quantity.spoon') &&
-      parent.children.any(
+      existing.any(
         (item) =>
             item.card.id == 'quantity.mass' ||
             item.card.id == 'quantity.volume' ||
@@ -365,17 +389,17 @@ bool canAddChild(RecipeNode parent, CardDefinition child) {
       ))
     return false;
   if (child.id == 'quantity.fat-content' &&
-      parent.children.any((item) => item.card.id == 'quantity.fat-content')) {
+      existing.any((item) => item.card.id == 'quantity.fat-content')) {
     return false;
   }
   if (child.id == 'quantity.time' &&
-      parent.children.any((item) => item.card.id == 'quantity.time'))
+      existing.any((item) => item.card.id == 'quantity.time'))
     return false;
   if (child.id == 'quantity.temperature' &&
-      parent.children.any((item) => item.card.id == 'quantity.temperature'))
+      existing.any((item) => item.card.id == 'quantity.temperature'))
     return false;
   return _hasAllowedChildKind(parent, child) &&
-      !parent.children.any((item) => item.card.id == child.id);
+      !existing.any((item) => item.card.id == child.id);
 }
 
 bool _canUseSpoonWithIngredient(CardDefinition ingredient) {
@@ -823,9 +847,11 @@ class _RecipeScreenState extends State<RecipeScreen>
   bool _canDrop(Object data, RecipeNode? parent) {
     final card = data is CardDefinition ? data : (data as _NodeDrag).node.card;
     if (parent == null) return canAddStep(card);
-    if (data is _NodeDrag && identical(data.source, parent.children))
-      return _hasAllowedChildKind(parent, card);
-    return canAddChild(parent, card);
+    return canAddChild(
+      parent,
+      card,
+      movingNode: data is _NodeDrag ? data.node : null,
+    );
   }
 
   void _drop(
@@ -2709,14 +2735,27 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
               : const SizedBox.shrink(),
         ),
         if (!widget.editing) ...[
-          _RecipeCategoryPicker(
-            value: widget.category,
-            onChanged: widget.onCategoryChanged,
-          ),
-          const SizedBox(height: 6),
-          _RecipeFastingPicker(
-            value: widget.fasting,
-            onChanged: widget.onFastingChanged,
+          Row(
+            children: [
+              Expanded(
+                child: _RecipeCategoryPicker(
+                  value: widget.category,
+                  onChanged: widget.onCategoryChanged,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _RecipeFastingPicker(
+                  value: widget.fasting,
+                  onChanged: widget.onFastingChanged,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Кухонная справка',
+                onPressed: () => showRecipeReferenceDialog(context),
+                icon: const Icon(Icons.help_outline),
+              ),
+            ],
           ),
           SizedBox(height: widget.compactVertical ? 5 : 18),
         ],
@@ -2900,13 +2939,17 @@ class _RecipeCategoryPicker extends StatelessWidget {
     key: ValueKey('recipe-category-picker-${value.storageKey}'),
     initialValue: value,
     isExpanded: true,
+    style: const TextStyle(fontSize: 17),
     decoration: const InputDecoration(
       labelText: 'Категория блюда',
       isDense: true,
     ),
     items: [
       for (final category in RecipeCategory.values)
-        DropdownMenuItem(value: category, child: Text(category.title)),
+        DropdownMenuItem(
+          value: category,
+          child: Text(category.title, style: const TextStyle(fontSize: 17)),
+        ),
     ],
     onChanged: (category) {
       if (category != null) onChanged(category);
@@ -2927,16 +2970,50 @@ class _RecipeFastingPicker extends StatelessWidget {
     key: ValueKey('recipe-fasting-picker-${value.storageKey}'),
     initialValue: value,
     isExpanded: true,
+    style: const TextStyle(fontSize: 17),
     decoration: const InputDecoration(labelText: 'Питание', isDense: true),
     items: [
       for (final fasting in RecipeFasting.values)
-        DropdownMenuItem(value: fasting, child: Text(fasting.title)),
+        DropdownMenuItem(
+          value: fasting,
+          child: Text(fasting.title, style: const TextStyle(fontSize: 17)),
+        ),
     ],
     onChanged: (fasting) {
       if (fasting != null) onChanged(fasting);
     },
   );
 }
+
+/// Короткая кулинарная памятка намеренно хранится в интерфейсе: это не
+/// рецептурные данные и не требует отдельного модуля или записи в БД.
+Future<void> showRecipeReferenceDialog(BuildContext context) =>
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Кухонная справка'),
+        content: const SingleChildScrollView(
+          child: SelectableText(
+            'Яйца\n'
+            '1 яйцо С1 примерно равно 1¼ яйца С2. В рецепте удобно считать: '
+            '4 яйца С2 ≈ 3 яйца С1.\n\n'
+            'Ложки без горки\n'
+            'Чайная — 5 мл, десертная — 10 мл, столовая — 15 мл.\n\n'
+            'Ориентировочные массы\n'
+            'Мука: без горки 3 / 6 / 9 г; с горкой 5 / 10 / 15 г.\n'
+            'Сахар: без горки 4 / 8 / 12 г; с горкой 6 / 12 / 18 г.\n'
+            'Вода и другие жидкости измеряются объёмом; «горка» к ним не применяется.\n\n'
+            'Порядок значений в строках: чайная / десертная / столовая ложка.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: Navigator.of(context).pop,
+            child: const Text('Понятно'),
+          ),
+        ],
+      ),
+    );
 
 class _OutlineNode {
   const _OutlineNode(this.kind, this.depth, this.parentIndex);
@@ -3110,6 +3187,7 @@ class _TreeEditor extends StatelessWidget {
     required this.onDrop,
     required this.onModuleDragChanged,
     this.parent,
+    this.siblingIndex = 0,
     this.depth = 0,
     this.compactLayout = false,
   });
@@ -3120,6 +3198,7 @@ class _TreeEditor extends StatelessWidget {
   onDrop;
   final ValueChanged<bool> onModuleDragChanged;
   final RecipeNode? parent;
+  final int siblingIndex;
   final int depth;
   final bool compactLayout;
   @override
@@ -3128,71 +3207,54 @@ class _TreeEditor extends StatelessWidget {
     // лишнюю нижнюю полосу вокруг дочерней карточки и визуально раздувает
     // родительский модуль после сброса.
     padding: EdgeInsets.only(bottom: depth == 0 ? (compactLayout ? 1 : 5) : 0),
-    child: DragTarget<Object>(
-      onWillAcceptWithDetails: (details) => canDrop(details.data, node),
-      onAcceptWithDetails: (details) =>
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => onDrop(
-              details.data,
-              node.children,
-              node.children.length,
+    child: Draggable<Object>(
+      data: _NodeDrag(node, source),
+      onDragStarted: () => onModuleDragChanged(true),
+      onDragEnd: (_) => onModuleDragChanged(false),
+      feedback: Material(
+        color: Colors.transparent,
+        child: _ModuleCard(card: node.card),
+      ),
+      child: _NodeBody(
+        node: node,
+        parent: parent,
+        siblingIndex: siblingIndex,
+        highlighted: false,
+        showDropCavity: false,
+        compactLayout: compactLayout,
+        depth: depth,
+        children: [
+          for (final entry in node.children.indexed) ...[
+            _InsertZone(
               parent: node,
+              target: node.children,
+              index: entry.$1,
+              canDrop: canDrop,
+              onDrop: onDrop,
+              compact: compactLayout,
             ),
+            _TreeEditor(
+              node: entry.$2,
+              source: node.children,
+              canDrop: canDrop,
+              onDrop: onDrop,
+              onModuleDragChanged: onModuleDragChanged,
+              parent: node,
+              siblingIndex: entry.$1,
+              depth: depth + 1,
+              compactLayout: compactLayout,
+            ),
+          ],
+          _InsertZone(
+            parent: node,
+            target: node.children,
+            index: node.children.length,
+            canDrop: canDrop,
+            onDrop: onDrop,
+            compact: compactLayout,
           ),
-      builder: (context, candidates, rejected) {
-        // Ямка нужна только для новой карточки из песочницы. Существующий
-        // модуль переносится по зонам порядка или в песочницу для удаления.
-        final showsNewChildCavity = candidates.any(
-          (candidate) => candidate is CardDefinition,
-        );
-        return Draggable<Object>(
-          data: _NodeDrag(node, source),
-          onDragStarted: () => onModuleDragChanged(true),
-          onDragEnd: (_) => onModuleDragChanged(false),
-          feedback: Material(
-            color: Colors.transparent,
-            child: _ModuleCard(card: node.card),
-          ),
-          child: _NodeBody(
-            node: node,
-            parent: parent,
-            highlighted: candidates.isNotEmpty,
-            showDropCavity: showsNewChildCavity,
-            compactLayout: compactLayout,
-            depth: depth,
-            children: [
-              for (final entry in node.children.indexed) ...[
-                _InsertZone(
-                  parent: node,
-                  target: node.children,
-                  index: entry.$1,
-                  canDrop: canDrop,
-                  onDrop: onDrop,
-                  compact: compactLayout,
-                ),
-                _TreeEditor(
-                  node: entry.$2,
-                  source: node.children,
-                  canDrop: canDrop,
-                  onDrop: onDrop,
-                  onModuleDragChanged: onModuleDragChanged,
-                  parent: node,
-                  depth: depth + 1,
-                  compactLayout: compactLayout,
-                ),
-              ],
-              _InsertZone(
-                parent: node,
-                target: node.children,
-                index: node.children.length,
-                canDrop: canDrop,
-                onDrop: onDrop,
-                compact: compactLayout,
-              ),
-            ],
-          ),
-        );
-      },
+        ],
+      ),
     ),
   );
 }
@@ -3203,6 +3265,7 @@ class _NodeBody extends StatelessWidget {
     required this.highlighted,
     required this.showDropCavity,
     this.parent,
+    required this.siblingIndex,
     this.children = const [],
     required this.compactLayout,
     required this.depth,
@@ -3211,6 +3274,7 @@ class _NodeBody extends StatelessWidget {
   final bool highlighted;
   final bool showDropCavity;
   final RecipeNode? parent;
+  final int siblingIndex;
   final List<Widget> children;
   final bool compactLayout;
   final int depth;
@@ -3224,9 +3288,12 @@ class _NodeBody extends StatelessWidget {
       final grammarCase = parent == null
           ? node.caseFromParent
           : grammarCaseForChild(parent!, node);
-      final prefix = parent == null ? null : joinTextForChild(parent!, node);
+      final prefix = parent == null ? null : separatorForChild(parent!, node);
       final label = node.card.formFor(grammarCase);
-      return prefix == null ? label : '${prefix.trim()} $label';
+      if (prefix == null || prefix.trim().isEmpty) return label;
+      final hasVisiblePrefix =
+          joinTextForChild(parent!, node) != null || siblingIndex > 0;
+      return hasVisiblePrefix ? '${prefix.trim()} $label' : label;
     }
     final unit = node.unit == NumericUnit.grams
         ? 'г'

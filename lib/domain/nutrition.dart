@@ -1,3 +1,4 @@
+import 'catalog.dart';
 import 'recipe_node.dart';
 
 /// Пищевая ценность на 100 г съедобной части продукта.
@@ -174,30 +175,56 @@ class NutritionCatalog {
     Iterable<RecipeNode> steps, {
     required int recipeMultiplier,
   }) {
-    NutritionTotals collect(RecipeNode node) {
-      var total = const NutritionTotals.zero();
+    // Один и тот же основной продукт часто сначала показывают как заготовку,
+    // а затем повторяют в шаге добавления. Для КБЖУ берётся наибольшее из
+    // таких количеств, а не сумма. Приправы и жидкости исключены: их нередко
+    // сознательно вводят несколькими порциями, поэтому они суммируются.
+    final maximumAmounts = <String, double>{};
+    final summedAmounts = <String, double>{};
+    final profiles = <String, NutritionProfile>{};
+
+    void collect(RecipeNode node) {
       final profile = forNode(node);
       if (profile != null) {
         final grams = _gramsFor(node);
         if (grams > 0) {
-          total += NutritionTotals(
-            protein: profile.protein * grams / 100,
-            fat: profile.fat * grams / 100,
-            carbohydrates: profile.carbohydrates * grams / 100,
+          final key = node.card.id == 'ingredient.minced-meat'
+              ? '${node.card.id}:${node.text?.trim() ?? ''}'
+              : node.card.id;
+          profiles[key] = profile;
+          final target = _sumRepeatedAmounts(node)
+              ? summedAmounts
+              : maximumAmounts;
+          target.update(
+            key,
+            (amount) => _sumRepeatedAmounts(node)
+                ? amount + grams
+                : amount > grams
+                ? amount
+                : grams,
+            ifAbsent: () => grams,
           );
         }
       }
-      for (final child in node.children) {
-        total += collect(child);
-      }
-      return total;
+      for (final child in node.children) collect(child);
     }
 
+    for (final step in steps) collect(step);
     var total = const NutritionTotals.zero();
-    for (final step in steps) {
-      total += collect(step);
+    for (final entry in {...maximumAmounts, ...summedAmounts}.entries) {
+      final profile = profiles[entry.key]!;
+      total += NutritionTotals(
+        protein: profile.protein * entry.value / 100,
+        fat: profile.fat * entry.value / 100,
+        carbohydrates: profile.carbohydrates * entry.value / 100,
+      );
     }
     return total.dividedBy(recipeMultiplier);
+  }
+
+  static bool _sumRepeatedAmounts(RecipeNode ingredient) {
+    final group = CatalogCards.ingredientGroup(ingredient.card);
+    return group == IngredientGroup.spices || group == IngredientGroup.liquids;
   }
 
   static double _gramsFor(RecipeNode ingredient) {

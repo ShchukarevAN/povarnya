@@ -20,8 +20,11 @@ const _locationUtensilIds = <String>{
   'utensil.oven',
 };
 
-bool _actionHasIngredientObject(RecipeNode action) =>
-    action.children.any((child) => child.card.kind == CardKind.ingredient);
+bool _actionHasIngredientObject(RecipeNode action) => action.children.any(
+  (child) =>
+      child.card.kind == CardKind.ingredient ||
+      child.card.kind == CardKind.text,
+);
 
 /// Прибор получает форму инструмента только тогда, когда ингредиент уже
 /// является главным объектом действия. Без ингредиента остаётся прямой
@@ -68,6 +71,12 @@ bool _usesUtensilAsLocation(RecipeNode parent, RecipeNode child) =>
 /// предлогов у утвари.
 GrammarCase grammarCaseForChild(RecipeNode parent, RecipeNode child) {
   if (parent.card.id == 'ingredient.canned') return GrammarCase.nominative;
+  if (parent.card.id == 'action.wrap') {
+    return parent.children.indexOf(child) == 1
+        ? GrammarCase.instrumental
+        : GrammarCase.accusative;
+  }
+  if (parent.card.id == 'action.continue') return GrammarCase.nominative;
   if (parent.card.id == 'action.season') return GrammarCase.instrumental;
   if (parent.card.id == 'action.grate' &&
       child.card.id == 'utensil.grater' &&
@@ -144,6 +153,33 @@ String? joinTextForChild(RecipeNode parent, RecipeNode child) {
   return null;
 }
 
+/// Соединяет одинаковые прямые ингредиенты как естественное перечисление:
+/// два — союзом «и», три и более — запятыми и союзом перед последним. Модуль
+/// «Завернуть» имеет два смысловых места, поэтому для него правило не действует.
+String separatorForChild(RecipeNode parent, RecipeNode child) {
+  final explicit = joinTextForChild(parent, child);
+  if (explicit != null) return explicit;
+  if (parent.card.id != 'action.wrap' &&
+      child.card.kind == CardKind.ingredient) {
+    final ingredients = parent.children
+        .where((item) => item.card.kind == CardKind.ingredient)
+        .toList();
+    final index = ingredients.indexOf(child);
+    if (index > 0) {
+      if (ingredients.length == 2 || index == ingredients.length - 1) {
+        return ' и ';
+      }
+      return ', ';
+    }
+  }
+  return parent.card.id == 'action.leave' && child.card.id == 'quantity.time'
+      ? ' на '
+      : parent.card.kind == CardKind.ingredient &&
+            child.card.kind == CardKind.quantity
+      ? ' '
+      : child.joinWithPrevious;
+}
+
 /// Преобразует редактируемое дерево в видимые фрагменты предложения.
 class RecipeRenderer {
   const RecipeRenderer();
@@ -216,30 +252,47 @@ class RecipeRenderer {
           : '${node.card.formFor(caseOverride ?? node.caseFromParent)}${eggCategory.isEmpty ? '' : ' $eggCategory'}',
     );
     if (node.value != null && node.unit != null) {
-      final suffix = switch (node.unit!) {
-        NumericUnit.grams => ' г',
-        NumericUnit.milliliters => ' мл',
-        NumericUnit.minutes => ' минут',
-        NumericUnit.celsius => ' °C',
-        NumericUnit.pieces => ' шт.',
-        NumericUnit.percent => '%',
-      };
-      final lower = _formatValue(
-        node.value!,
-        node.unit!,
-        servings: servings,
-        recipeMultiplier: recipeMultiplier,
-      );
-      final upper = node.upperValue == null
-          ? ''
-          : '–${_formatValue(node.upperValue!, node.unit!, servings: servings, recipeMultiplier: recipeMultiplier)}';
-      ownText.write('${isParameter ? '' : ' '}$lower$upper$suffix');
+      if (node.unit == NumericUnit.minutes) {
+        final lower = _formatDuration(node.value!);
+        final upper = node.upperValue == null
+            ? ''
+            : '–${_formatDuration(node.upperValue!)}';
+        ownText.write('${isParameter ? '' : ' '}$lower$upper');
+      } else {
+        final suffix = switch (node.unit!) {
+          NumericUnit.grams => ' г',
+          NumericUnit.milliliters => ' мл',
+          NumericUnit.minutes => ' минут',
+          NumericUnit.celsius => ' °C',
+          NumericUnit.pieces => ' шт.',
+          NumericUnit.percent => '%',
+        };
+        final lower = _formatValue(
+          node.value!,
+          node.unit!,
+          servings: servings,
+          recipeMultiplier: recipeMultiplier,
+        );
+        final upper = node.upperValue == null
+            ? ''
+            : '–${_formatValue(node.upperValue!, node.unit!, servings: servings, recipeMultiplier: recipeMultiplier)}';
+        ownText.write('${isParameter ? '' : ' '}$lower$upper$suffix');
+      }
     }
+    return _appendChildren(
+      <RecipeRenderPart>[RecipeRenderPart(ownText.toString(), nodeId: node.id)],
+      node,
+      servings,
+      recipeMultiplier,
+    );
+  }
 
-    final parts = <RecipeRenderPart>[
-      RecipeRenderPart(ownText.toString(), nodeId: node.id),
-    ];
-    RecipeNode? previous;
+  List<RecipeRenderPart> _appendChildren(
+    List<RecipeRenderPart> parts,
+    RecipeNode node,
+    int servings,
+    int recipeMultiplier,
+  ) {
     for (final child in node.children) {
       final childParts = renderParts(
         child,
@@ -248,23 +301,42 @@ class RecipeRenderer {
         caseOverride: grammarCaseForChild(node, child),
       );
       if (childParts.every((part) => part.text.isEmpty)) continue;
-      final separator =
-          joinTextForChild(node, child) ??
-          (node.card.id == 'action.leave' && child.card.id == 'quantity.time'
-              ? ' на '
-              : node.card.kind == CardKind.ingredient &&
-                    child.card.kind == CardKind.quantity
-              ? ' '
-              : previous != null &&
-                    previous.card.kind == child.card.kind &&
-                    child.joinWithPrevious == ' '
-              ? ', '
-              : child.joinWithPrevious);
+      final separator = separatorForChild(node, child);
       parts.add(RecipeRenderPart(separator));
       parts.addAll(childParts);
-      previous = child;
     }
     return parts;
+  }
+
+  String _formatDuration(int minutes) {
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    final parts = <String>[];
+    if (hours > 0) parts.add('$hours ${_hourWord(hours)}');
+    if (remainingMinutes > 0 || parts.isEmpty) {
+      parts.add('$remainingMinutes ${_minuteWord(remainingMinutes)}');
+    }
+    return parts.join(' ');
+  }
+
+  String _hourWord(int value) {
+    final lastTwo = value % 100;
+    if (lastTwo >= 11 && lastTwo <= 14) return 'часов';
+    return switch (value % 10) {
+      1 => 'час',
+      2 || 3 || 4 => 'часа',
+      _ => 'часов',
+    };
+  }
+
+  String _minuteWord(int value) {
+    final lastTwo = value % 100;
+    if (lastTwo >= 11 && lastTwo <= 14) return 'минут';
+    return switch (value % 10) {
+      1 => 'минута',
+      2 || 3 || 4 => 'минуты',
+      _ => 'минут',
+    };
   }
 
   /// Числовые количества масштабируются на отношение выбранных и базовых
