@@ -4053,7 +4053,7 @@ class _InsertZone extends StatelessWidget {
       final hitWidth = parent == null
           ? double.infinity
           : tolerant
-          ? visualWidth + 100
+          ? 118.0
           : visualWidth;
       final height = hasCandidate ? 34.0 : (compact ? 8.0 : 28.0);
       return SizedBox(
