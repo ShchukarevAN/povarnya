@@ -1116,6 +1116,7 @@ class _RecipeScreenState extends State<RecipeScreen>
         modeTransition: _modeTransition,
         modeTransitionFromEditing: _modeTransitionFromEditing,
         modeDragging: _isModeDragging,
+        moduleDragging: _isRecipeModuleDragging,
         renderer: _renderer,
         showVisuals: _showVisuals,
         servings: _servings,
@@ -2645,6 +2646,7 @@ class _RecipeCanvas extends StatefulWidget {
     required this.modeTransition,
     required this.modeTransitionFromEditing,
     required this.modeDragging,
+    required this.moduleDragging,
     required this.renderer,
     required this.showVisuals,
     required this.servings,
@@ -2672,6 +2674,10 @@ class _RecipeCanvas extends StatefulWidget {
   final Animation<double> modeTransition;
   final bool modeTransitionFromEditing;
   final bool modeDragging;
+
+  /// Пока модуль находится в руках, зоны вставки расширяют только область
+  /// попадания. Это даёт допуск ±50 px, не раздвигая обычное дерево.
+  final bool moduleDragging;
   final RecipeRenderer renderer;
   final bool showVisuals;
   final int servings;
@@ -2762,6 +2768,7 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
               canDrop: widget.canDrop,
               onDrop: widget.onDrop,
               onModuleDragChanged: widget.onModuleDragChanged,
+              moduleDragging: widget.moduleDragging,
               compactLayout: widget.compactVertical,
             ),
           ),
@@ -2864,6 +2871,7 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
                 canDrop: widget.canDrop,
                 onDrop: widget.onDrop,
                 compact: widget.compactVertical,
+                tolerant: widget.moduleDragging,
               ),
             _stepEntry(entry.$1, entry.$2),
           ],
@@ -2876,6 +2884,7 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
             canDrop: widget.canDrop,
             onDrop: widget.onDrop,
             compact: widget.compactVertical,
+            tolerant: widget.moduleDragging,
           ),
       ],
     ),
@@ -3296,6 +3305,7 @@ class _TreeEditor extends StatelessWidget {
     required this.canDrop,
     required this.onDrop,
     required this.onModuleDragChanged,
+    required this.moduleDragging,
     this.parent,
     this.siblingIndex = 0,
     this.depth = 0,
@@ -3307,6 +3317,7 @@ class _TreeEditor extends StatelessWidget {
   final void Function(Object, List<RecipeNode>, int, {RecipeNode? parent})
   onDrop;
   final ValueChanged<bool> onModuleDragChanged;
+  final bool moduleDragging;
   final RecipeNode? parent;
   final int siblingIndex;
   final int depth;
@@ -3342,6 +3353,7 @@ class _TreeEditor extends StatelessWidget {
               canDrop: canDrop,
               onDrop: onDrop,
               compact: compactLayout,
+              tolerant: moduleDragging,
             ),
             if (_showsIngredientEnumeration(node, entry.$2))
               _EditorEnumerationSeparator(
@@ -3354,6 +3366,7 @@ class _TreeEditor extends StatelessWidget {
               canDrop: canDrop,
               onDrop: onDrop,
               onModuleDragChanged: onModuleDragChanged,
+              moduleDragging: moduleDragging,
               parent: node,
               siblingIndex: entry.$1,
               depth: depth + 1,
@@ -3367,6 +3380,7 @@ class _TreeEditor extends StatelessWidget {
             canDrop: canDrop,
             onDrop: onDrop,
             compact: compactLayout,
+            tolerant: moduleDragging,
           ),
         ],
       ),
@@ -4005,6 +4019,7 @@ class _InsertZone extends StatelessWidget {
     required this.canDrop,
     required this.onDrop,
     this.compact = false,
+    this.tolerant = false,
   });
   final RecipeNode? parent;
   final List<RecipeNode> target;
@@ -4013,6 +4028,10 @@ class _InsertZone extends StatelessWidget {
   final void Function(Object, List<RecipeNode>, int, {RecipeNode? parent})
   onDrop;
   final bool compact;
+
+  /// Во время перетаскивания зона захвата шире самой ямки на 50 px с каждой
+  /// стороны. В покое она не занимает лишнее место в строке.
+  final bool tolerant;
   @override
   Widget build(BuildContext context) => DragTarget<Object>(
     onWillAcceptWithDetails: (details) => canDrop(details.data, parent),
@@ -4020,25 +4039,50 @@ class _InsertZone extends StatelessWidget {
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => onDrop(details.data, target, index, parent: parent),
         ),
-    builder: (context, candidates, rejected) => AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
-      width: parent == null
+    builder: (context, candidates, rejected) {
+      final hasCandidate = candidates.isNotEmpty;
+      final visualWidth = parent == null
           ? double.infinity
-          : candidates.isEmpty
-          ? 18
-          : 80,
-      // В компактном дереве это остаётся областью приёма, но не занимает
-      // зрительно целую строку до и после каждого вложения.
-      height: candidates.isEmpty ? (compact ? 8 : 28) : 34,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: candidates.isEmpty
-            ? Colors.transparent
-            : Theme.of(context).colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: candidates.isEmpty ? null : const Text('Отпустите здесь'),
-    ),
+          : hasCandidate
+          ? 80.0
+          : 18.0;
+      // SizedBox задаёт именно область попадания DragTarget. Визуальная ямка
+      // остаётся прежней ширины и центрируется внутри неё: курсор можно
+      // провести на 50 px левее или правее, не получая пустот в обычном
+      // состоянии редактора.
+      final hitWidth = parent == null
+          ? double.infinity
+          : tolerant
+          ? visualWidth + 100
+          : visualWidth;
+      final height = hasCandidate ? 34.0 : (compact ? 8.0 : 28.0);
+      return SizedBox(
+        width: hitWidth,
+        height: height,
+        child: Align(
+          alignment: Alignment.center,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width: visualWidth,
+            height: height,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: hasCandidate
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: hasCandidate
+                ? Icon(
+                    Icons.subdirectory_arrow_right,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.secondary,
+                  )
+                : null,
+          ),
+        ),
+      );
+    },
   );
 }
 
