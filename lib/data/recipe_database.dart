@@ -873,10 +873,25 @@ class RecipeDatabase {
             customizedRecipeIds.contains(recipe.id)) {
           continue;
         }
-        // SQLite foreign_keys выключен по умолчанию в sqflite_ffi, поэтому
-        // дочерние узлы удаляем явно до удаления корня.
+        // Не удаляем сам корень: к нему прикреплена пользовательская
+        // фотография. Каталог заменяет только своё модульное дерево и свои
+        // поля, не затрагивая заметку, избранное, статистику и фото.
         batch.delete('node', where: 'root_id = ?', whereArgs: [recipe.id]);
-        batch.delete('document_root', where: 'id = ?', whereArgs: [recipe.id]);
+        batch.update(
+          'document_root',
+          {
+            'title': recipe.title,
+            'document_kind': 0,
+            'servings': _encodeOneByte(recipe.servings),
+            'recipe_multiplier': _encodeOneByte(recipe.servings),
+            'category': recipe.category.storageKey,
+            'fasting': recipe.fasting.storageKey,
+          },
+          where: 'id = ?',
+          whereArgs: [recipe.id],
+        );
+        _addNodeTree(batch, recipe.id, recipe.buildSteps());
+        continue;
       }
       final usage = existingUsage[recipe.id];
       batch.insert('document_root', {
