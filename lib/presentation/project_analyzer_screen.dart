@@ -140,6 +140,7 @@ class ProjectAnalyzerService {
     await _auditProfilerIsolation(),
     await _auditSingleRecipeRenderer(),
     await _auditRecipeNodePersistence(),
+    await _auditExternalFlutterSdk(),
   ];
 
   ProjectAudit _auditRecipeIngredients() {
@@ -371,7 +372,7 @@ class ProjectAnalyzerService {
       title: 'Границы статического анализа',
       passed: missing.isEmpty,
       details: missing.isEmpty
-          ? 'Кэши, локальный Flutter SDK и сторонний код исключены из анализа проекта.'
+          ? 'Кэши, проектный инструментарий и сторонний код исключены из анализа проекта.'
           : 'Не исключены служебные каталоги: ${missing.join(', ')}',
     );
   }
@@ -445,6 +446,28 @@ class ProjectAnalyzerService {
       details: passed
           ? 'Сохранение, заполнение и обновление каталога используют один _addNodeTree.'
           : 'Ожидалась одна реализация INSERT node и три её вызова; найдено: $nodeInserts и ${serializerReferences - 1}.',
+    );
+  }
+
+  Future<ProjectAudit> _auditExternalFlutterSdk() async {
+    const sdkPath = '/home/smirnovom/Среды разработки/flutter';
+    final environmentFile = File('$root/Инструментарий/среда_разработки.sh');
+    final environmentSource = await environmentFile.exists()
+        ? await environmentFile.readAsString()
+        : '';
+    final legacySdk = Directory('$root/Инструментарий/flutter');
+    final externalSdk = Directory(sdkPath);
+    final passed =
+        !await legacySdk.exists() &&
+        await externalSdk.exists() &&
+        environmentSource.contains(sdkPath) &&
+        environmentSource.contains('POVARNYA_FLUTTER_ROOT');
+    return ProjectAudit(
+      title: 'Flutter SDK отделён от проекта',
+      passed: passed,
+      details: passed
+          ? 'SDK находится в «Среды разработки», а единая конфигурация допускает переопределение пути.'
+          : 'Flutter SDK отсутствует по внешнему пути, остался внутри проекта или не задан в общей конфигурации.',
     );
   }
 
