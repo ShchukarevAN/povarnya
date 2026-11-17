@@ -167,6 +167,8 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
   Map<String, GlobalKey>? _recipeOpenIngredientAnchors;
   bool _showSavedRecipeNotice = false;
   Timer? _savedRecipeNoticeTimer;
+  bool _showScaleNotice = false;
+  Timer? _scaleNoticeTimer;
   final Map<int, Offset> _touchPointers = {};
   Offset? _pinchOriginA;
   Offset? _pinchOriginB;
@@ -259,7 +261,14 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
   void _setScale(double value, {bool save = true}) {
     final nextScale = value.clamp(.7, 1.6).toDouble();
     if (nextScale == _scale) return;
-    setState(() => _scale = nextScale);
+    setState(() {
+      _scale = nextScale;
+      _showScaleNotice = true;
+    });
+    _scaleNoticeTimer?.cancel();
+    _scaleNoticeTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _showScaleNotice = false);
+    });
     if (save) {
       AppSettings().scale = _scale;
       AppSettings().save();
@@ -417,6 +426,7 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
   void _displaySavedRecipeNotice() {
     setState(() => _showSavedRecipeNotice = true);
     _savedRecipeNoticeTimer?.cancel();
+    _scaleNoticeTimer?.cancel();
     _savedRecipeNoticeTimer = Timer(const Duration(seconds: 2), () {
       if (mounted) setState(() => _showSavedRecipeNotice = false);
     });
@@ -559,6 +569,12 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
                         // Над плавающей кнопкой «Создать рецепт».
                         bottom: 96,
                         child: _SavedRecipeNotice(),
+                      ),
+                    if (_showScaleNotice)
+                      Positioned(
+                        left: 16,
+                        top: 16,
+                        child: _ScaleNotice(scale: _scale),
                       ),
                   ],
                 ),
@@ -924,6 +940,31 @@ class _SavedRecipeNotice extends StatelessWidget {
       child: Text(
         'Рецепт сохранён!',
         style: TextStyle(color: Theme.of(context).colorScheme.onInverseSurface),
+      ),
+    ),
+  );
+}
+
+class _ScaleNotice extends StatelessWidget {
+  const _ScaleNotice({required this.scale});
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.inverseSurface,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Text(
+          'Масштаб: ${(scale * 100).round()}%',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onInverseSurface,
+          ),
+        ),
       ),
     ),
   );

@@ -1388,67 +1388,96 @@ class _RecipeNotes extends StatelessWidget {
   final bool revealRecipePhoto;
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.all(16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _RecipePhotoPanel(
-          path: recipePhotoPath,
-          bytes: recipePhotoBytes,
-          saving: savingRecipePhoto,
-          onPick: onPickRecipePhoto,
-          reveal: revealRecipePhoto,
-        ),
-        const SizedBox(height: 12),
-        _servingsAndNutrition(context),
-        const SizedBox(height: 8),
-        Text('Примечания', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 4),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: TextField(
-            key: const ValueKey('recipe-notes-field'),
-            controller: controller,
-            minLines: 2,
-            maxLines: 12,
-            textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
-              isDense: true,
-              hintText: 'Ваши впечатления или замечания по рецепту',
-              alignLabelWithHint: true,
-            ),
-          ),
-        ),
-        if (similarRecipes.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text(
-            'Похожие рецепты',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          for (final recipe in similarRecipes)
-            Card(
-              margin: const EdgeInsets.only(bottom: 6),
-              clipBehavior: Clip.antiAlias,
-              child: ListTile(
-                onTap: () => onOpenSimilarRecipe(recipe),
-                dense: true,
-                leading: const Icon(Icons.restaurant_menu),
-                title: Text(recipe.title),
-                subtitle: Text(
-                  similarRecipeIngredientPreview(recipe),
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final portrait =
+          MediaQuery.sizeOf(context).height > MediaQuery.sizeOf(context).width;
+      // В портретном режиме фото не должно вытеснять всю правую/нижнюю
+      // панель. При достаточной ширине показатели занимают остаток той же
+      // строки; при увеличении масштаба строка естественно вернётся в столбец.
+      final useHeaderRow = portrait && constraints.maxWidth >= 460;
+      final photo = _RecipePhotoPanel(
+        path: recipePhotoPath,
+        bytes: recipePhotoBytes,
+        saving: savingRecipePhoto,
+        onPick: onPickRecipePhoto,
+        reveal: revealRecipePhoto,
+      );
+      final header = useHeaderRow
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: (constraints.maxWidth * .36).clamp(132.0, 210.0),
+                  child: photo,
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: _servingsAndNutrition(context)),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                photo,
+                const SizedBox(height: 12),
+                _servingsAndNutrition(context),
+              ],
+            );
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            header,
+            const SizedBox(height: 8),
+            Text('Примечания', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: TextField(
+                key: const ValueKey('recipe-notes-field'),
+                controller: controller,
+                minLines: 2,
+                maxLines: 12,
+                textAlignVertical: TextAlignVertical.top,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'Ваши впечатления или замечания по рецепту',
+                  alignLabelWithHint: true,
                 ),
               ),
             ),
-        ],
-      ],
-    ),
+            if (similarRecipes.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Похожие рецепты',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              for (final recipe in similarRecipes)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    onTap: () => onOpenSimilarRecipe(recipe),
+                    dense: true,
+                    leading: const Icon(Icons.restaurant_menu),
+                    title: Text(recipe.title),
+                    subtitle: Text(
+                      similarRecipeIngredientPreview(recipe),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      );
+    },
   );
 
   Widget _servingsAndNutrition(BuildContext context) => SizedBox(
