@@ -204,6 +204,9 @@ class RecipeRenderer {
     if (node.card.id == 'text.free') {
       return [RecipeRenderPart(node.text?.trim() ?? '', nodeId: node.id)];
     }
+    if (node.card.id == 'text.recipe-dish') {
+      return [RecipeRenderPart(node.text?.trim() ?? 'блюдо', nodeId: node.id)];
+    }
     if (node.card.id == 'characteristic.shape') {
       return [
         RecipeRenderPart(node.text?.trim() ?? 'кубиками', nodeId: node.id),

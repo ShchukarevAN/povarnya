@@ -37,6 +37,8 @@ class RecipeDatabase {
       options: OpenDatabaseOptions(version: 1, onCreate: _createSchema),
     );
     await _ensureSchemaCompatibility(_database!);
+    await _migrateLegacyCatalogRecipeIds(_database!);
+    await _deleteRecipesWithoutIdsOnce(_database!);
     final rows = await _database!.rawQuery(
       'SELECT COUNT(*) AS count FROM document_root',
     );
@@ -172,6 +174,89 @@ class RecipeDatabase {
     conflictAlgorithm: ConflictAlgorithm.replace,
   );
 
+  /// Переводит прежние читаемые ключи каталога в независимые постоянные ID,
+  /// сохраняя все пользовательские данные, дерево модулей и фотографию.
+  Future<void> _migrateLegacyCatalogRecipeIds(Database database) async {
+    for (final recipe in catalogRecipes) {
+      if (recipe.catalogKey == recipe.id) continue;
+      final legacyRows = await database.query(
+        'document_root',
+        where: 'id = ?',
+        whereArgs: [recipe.catalogKey],
+        limit: 1,
+      );
+      if (legacyRows.isEmpty) continue;
+      final currentRows = await database.query(
+        'document_root',
+        where: 'id = ?',
+        whereArgs: [recipe.id],
+        limit: 1,
+      );
+      if (currentRows.isNotEmpty) continue;
+      await database.transaction((transaction) async {
+        await transaction.rawInsert(
+          'INSERT INTO document_root '
+          '(id, title, document_kind, note, is_customized, servings, '
+          'recipe_multiplier, category, fasting, flags, open_count, '
+          'change_count, last_open_day, last_change_day) '
+          'SELECT ?, title, document_kind, note, is_customized, servings, '
+          'recipe_multiplier, category, fasting, flags, open_count, '
+          'change_count, last_open_day, last_change_day '
+          'FROM document_root WHERE id = ?',
+          [recipe.id, recipe.catalogKey],
+        );
+        await transaction.rawUpdate(
+          'UPDATE node SET parent_id = ? || substr(parent_id, length(?) + 1) '
+          'WHERE root_id = ? AND parent_id IS NOT NULL',
+          [recipe.id, recipe.catalogKey, recipe.catalogKey],
+        );
+        await transaction.rawUpdate(
+          'UPDATE node SET id = ? || substr(id, length(?) + 1), root_id = ? '
+          'WHERE root_id = ?',
+          [recipe.id, recipe.catalogKey, recipe.id, recipe.catalogKey],
+        );
+        await transaction.update(
+          'recipe_photo',
+          {'recipe_id': recipe.id},
+          where: 'recipe_id = ?',
+          whereArgs: [recipe.catalogKey],
+        );
+        await transaction.delete(
+          'document_root',
+          where: 'id = ?',
+          whereArgs: [recipe.catalogKey],
+        );
+      });
+    }
+  }
+
+  /// Однократная санитарная очистка старых черновых строк без ключа.
+  Future<void> _deleteRecipesWithoutIdsOnce(Database database) async {
+    const key = 'removed_recipes_without_id_v1';
+    final present = await database.query(
+      'app_metadata',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (present.isNotEmpty) return;
+    await database.transaction((transaction) async {
+      await transaction.delete(
+        'node',
+        where: "root_id IS NULL OR trim(root_id) = ''",
+      );
+      await transaction.delete(
+        'recipe_photo',
+        where: "recipe_id IS NULL OR trim(recipe_id) = ''",
+      );
+      await transaction.delete(
+        'document_root',
+        where: "id IS NULL OR trim(id) = ''",
+      );
+      await transaction.insert('app_metadata', {'key': key, 'value': '1'});
+    });
+  }
+
   int _todayKey([DateTime? now]) {
     final value = now ?? DateTime.now();
     return value.year * 10000 + value.month * 100 + value.day;
@@ -220,6 +305,18 @@ class RecipeDatabase {
     final note = rows.isEmpty ? '' : (rows.first['note'] as String? ?? '');
     _recipeNotes[recipeId] = note;
     return note;
+  }
+
+  Future<String> loadRecipeTitle(String recipeId) async {
+    final database = await open();
+    final rows = await database.query(
+      'document_root',
+      columns: ['title'],
+      where: 'id = ?',
+      whereArgs: [recipeId],
+      limit: 1,
+    );
+    return rows.isEmpty ? '' : rows.first['title'] as String? ?? '';
   }
 
   Future<void> saveRecipeNote(String recipeId, String note) async {
@@ -303,6 +400,18 @@ class RecipeDatabase {
     };
     _recipeCategories.addAll(categories);
     return categories;
+  }
+
+  Future<Map<String, String>> loadRecipeTitles() async {
+    final database = await open();
+    final rows = await database.query(
+      'document_root',
+      columns: ['id', 'title'],
+    );
+    return {
+      for (final row in rows)
+        row['id'] as String: row['title'] as String? ?? '',
+    };
   }
 
   /// Постность блюда хранится отдельно от его основного раздела.
@@ -574,6 +683,7 @@ class RecipeDatabase {
   /// Атомарно записывает всё дерево и заметку при выходе из рецепта.
   Future<void> saveRecipeContent({
     required String recipeId,
+    required String title,
     required List<RecipeNode> steps,
     required String note,
     required int servings,
@@ -587,6 +697,7 @@ class RecipeDatabase {
     batch.update(
       'document_root',
       {
+        'title': title,
         'note': note,
         'servings': _encodeOneByte(servings),
         'recipe_multiplier': _encodeOneByte(recipeMultiplier),

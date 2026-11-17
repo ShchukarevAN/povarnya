@@ -422,7 +422,9 @@ bool _canUseSpoonWithIngredient(CardDefinition ingredient) {
 const _spoonMeasuredIngredientIds = {'ingredient.baking-powder'};
 
 bool canAddStep(CardDefinition card) =>
-    card.kind == CardKind.action || card.id == CatalogCards.freeText.id;
+    card.kind == CardKind.action ||
+    card.id == CatalogCards.freeText.id ||
+    card.id == CatalogCards.recipeDish.id;
 
 GrammarCase grammarCaseFor(RecipeNode parent, CardDefinition child) =>
     grammarCaseForChild(parent, RecipeNode(id: 'preview', card: child));
@@ -482,6 +484,7 @@ class _RecipeScreenState extends State<RecipeScreen>
   late final List<RecipeNode> _catalogSteps =
       widget.initialRecipe?.buildSteps() ?? [];
   late final TextEditingController _noteController;
+  late final TextEditingController _titleController;
   late final TextEditingController _servingsController;
   late final TextEditingController _recipeMultiplierController;
   late final FocusNode _servingsFocusNode;
@@ -527,6 +530,7 @@ class _RecipeScreenState extends State<RecipeScreen>
   String? _recipePhotoPath;
   Uint8List? _recipePhotoBytes;
   bool _savingRecipePhoto = false;
+  late String _title = widget.initialRecipe?.title ?? 'Новый рецепт';
 
   @override
   void initState() {
@@ -540,6 +544,7 @@ class _RecipeScreenState extends State<RecipeScreen>
     _servings = initialServings;
     _recipeMultiplier = initialServings;
     _noteController = TextEditingController();
+    _titleController = TextEditingController(text: _title);
     _servingsController = TextEditingController(text: '$initialServings');
     _recipeMultiplierController = TextEditingController(
       text: '$initialServings',
@@ -560,6 +565,7 @@ class _RecipeScreenState extends State<RecipeScreen>
     final database = RecipeDatabase();
     final values = await Future.wait<dynamic>([
       database.recordRecipeOpened(recipeId),
+      database.loadRecipeTitle(recipeId),
       database.loadRecipeNote(recipeId),
       database.loadRecipeSteps(recipeId),
       database.loadRecipeServings(recipeId),
@@ -570,20 +576,25 @@ class _RecipeScreenState extends State<RecipeScreen>
       database.loadRecipePhotoBytes(recipeId),
     ]);
     if (!mounted) return;
-    final savedSteps = values[2] as List<RecipeNode>;
+    final savedSteps = values[3] as List<RecipeNode>;
     setState(() {
-      _noteController.text = values[1] as String;
-      _servings = values[3] as int;
+      _title = (values[1] as String).trim().isEmpty
+          ? _title
+          : values[1] as String;
+      _titleController.text = _title;
+      _noteController.text = values[2] as String;
+      _servings = values[4] as int;
       _servingsController.text = '$_servings';
-      _recipeMultiplier = values[4] as int;
+      _recipeMultiplier = values[5] as int;
       _recipeMultiplierController.text = '$_recipeMultiplier';
-      _category = values[5] as RecipeCategory;
-      _fasting = values[6] as RecipeFasting;
-      _recipePhotoPath = values[7] as String?;
-      _recipePhotoBytes = values[8] as Uint8List?;
+      _category = values[6] as RecipeCategory;
+      _fasting = values[7] as RecipeFasting;
+      _recipePhotoPath = values[8] as String?;
+      _recipePhotoBytes = values[9] as Uint8List?;
       _steps
         ..clear()
         ..addAll(savedSteps.isNotEmpty ? savedSteps : _catalogSteps);
+      _updateRecipeDishLabels();
       _savedContentFingerprint = _contentFingerprint();
     });
     // Внешний переход измеряет слова ингредиентов. Сообщаем ему о готовности
@@ -599,10 +610,16 @@ class _RecipeScreenState extends State<RecipeScreen>
   Future<bool?> _saveChangesIfNeeded() async {
     final recipeId = widget.initialRecipe?.id;
     if (recipeId == null || _savedContentFingerprint == null) return false;
+    if (_title.trim().isEmpty) {
+      _title = widget.initialRecipe?.title ?? 'Новый рецепт';
+      _titleController.text = _title;
+      _updateRecipeDishLabels();
+    }
     if (_contentFingerprint() == _savedContentFingerprint) return false;
     try {
       await RecipeDatabase().saveRecipeContent(
         recipeId: recipeId,
+        title: _title.trim(),
         steps: _steps,
         note: _noteController.text,
         servings: _servings,
@@ -671,6 +688,7 @@ class _RecipeScreenState extends State<RecipeScreen>
   }
 
   String _contentFingerprint() => jsonEncode({
+    'title': _title,
     'note': _noteController.text,
     'servings': _servings,
     'recipeMultiplier': _recipeMultiplier,
@@ -678,6 +696,15 @@ class _RecipeScreenState extends State<RecipeScreen>
     'fasting': _fasting.storageKey,
     'steps': _steps.map(_snapshotNode).toList(),
   });
+
+  void _updateRecipeDishLabels() {
+    void visit(RecipeNode node) {
+      if (node.card.id == 'text.recipe-dish') node.text = _title;
+      for (final child in node.children) visit(child);
+    }
+
+    for (final step in _steps) visit(step);
+  }
 
   Map<String, Object?> _snapshotNode(RecipeNode node) => {
     'id': node.id,
@@ -697,6 +724,7 @@ class _RecipeScreenState extends State<RecipeScreen>
     _modeTransition.dispose();
     _backSwipeController.dispose();
     _noteController.dispose();
+    _titleController.dispose();
     _servingsController.dispose();
     _recipeMultiplierController.dispose();
     _servingsFocusNode.dispose();
@@ -824,7 +852,9 @@ class _RecipeScreenState extends State<RecipeScreen>
             card.id == 'quantity.fat-content'
         ? 1
         : null,
-    text: card.id == 'ingredient.eggs'
+    text: card.id == 'text.recipe-dish'
+        ? _title
+        : card.id == 'ingredient.eggs'
         ? 'С1'
         : card.id == 'characteristic.shape'
         ? 'кубиками'
@@ -1060,7 +1090,12 @@ class _RecipeScreenState extends State<RecipeScreen>
       );
       final canvas = _RecipeCanvas(
         key: _recipeCanvasKey,
-        title: widget.initialRecipe?.title ?? 'Новый рецепт',
+        title: _title,
+        titleController: _titleController,
+        onTitleChanged: (value) => setState(() {
+          _title = value;
+          _updateRecipeDishLabels();
+        }),
         steps: _steps,
         editing: _editing,
         modeTransition: _modeTransition,
@@ -2559,6 +2594,8 @@ class _RecipeCanvas extends StatefulWidget {
   const _RecipeCanvas({
     super.key,
     required this.title,
+    required this.titleController,
+    required this.onTitleChanged,
     required this.steps,
     required this.editing,
     required this.modeTransition,
@@ -2584,6 +2621,8 @@ class _RecipeCanvas extends StatefulWidget {
     this.entranceIngredientAnchors,
   });
   final String title;
+  final TextEditingController titleController;
+  final ValueChanged<String> onTitleChanged;
   final List<RecipeNode> steps;
   final bool editing;
   final Animation<double> modeTransition;
@@ -2709,11 +2748,23 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
       children: [
         Opacity(
           opacity: widget.hideTitle ? 0 : 1,
-          child: Text(
-            key: widget.entranceTitleAnchor,
-            widget.title,
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
+          child: widget.editing
+              ? TextField(
+                  controller: widget.titleController,
+                  maxLength: 120,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                  decoration: const InputDecoration(
+                    labelText: 'Название рецепта',
+                    counterText: '',
+                    isDense: true,
+                  ),
+                  onChanged: widget.onTitleChanged,
+                )
+              : Text(
+                  key: widget.entranceTitleAnchor,
+                  widget.title,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
         ),
         SizedBox(height: widget.compactVertical ? 5 : 18),
         AnimatedSize(
@@ -3369,6 +3420,13 @@ class _NodeBody extends StatelessWidget {
                       ? _ParameterLabel(node: node, style: labelStyle)
                       : node.card.id == 'text.free'
                       ? _FreeTextLabel(node: node, style: labelStyle)
+                      : node.card.id == 'text.recipe-dish'
+                      ? Text(
+                          node.text?.trim().isNotEmpty == true
+                              ? node.text!.trim()
+                              : 'блюдо',
+                          style: labelStyle,
+                        )
                       : node.card.id == 'utensil.multicooker-program'
                       ? _MulticookerProgramLabel(
                           node: node,

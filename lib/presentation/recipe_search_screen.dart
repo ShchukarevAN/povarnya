@@ -98,6 +98,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
   Set<String> _favoriteRecipeIds = const {};
   Map<String, RecipeCategory> _recipeCategories = const {};
   Map<String, RecipeFasting> _recipeFasting = const {};
+  Map<String, String> _recipeTitles = const {};
   RecipeFasting? _fastingFilter;
   final Set<RecipeCategory> _expandedCategories = {};
 
@@ -110,7 +111,18 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     _loadFavoriteRecipes();
     _loadRecipeCategories();
     _loadRecipeFasting();
+    _loadRecipeTitles();
   }
+
+  Future<void> _loadRecipeTitles() async {
+    final titles = await RecipeDatabase().loadRecipeTitles();
+    if (mounted) setState(() => _recipeTitles = titles);
+  }
+
+  String _titleOf(CatalogRecipe recipe) =>
+      _recipeTitles[recipe.id]?.trim().isNotEmpty == true
+      ? _recipeTitles[recipe.id]!.trim()
+      : recipe.title;
 
   Future<void> _loadRecipeCategories() async {
     final categories = await RecipeDatabase().loadRecipeCategories();
@@ -155,7 +167,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     final sortedResults = searchAndSortByLabel(
       results,
       query: _titleQuery,
-      labelOf: (recipe) => recipe.title,
+      labelOf: _titleOf,
     );
     if (!_randomOrder) return sortedResults;
     final positions = {
@@ -588,6 +600,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     for (final recipe in recipes)
       _RecipeResultCard(
         recipe: recipe,
+        title: _titleOf(recipe),
         category: _categoryOf(recipe),
         compactVertical: compactVertical,
         isFavorite: _favoriteRecipeIds.contains(recipe.id),
@@ -805,6 +818,7 @@ class _ResultCount extends StatelessWidget {
 class _RecipeResultCard extends StatefulWidget {
   const _RecipeResultCard({
     required this.recipe,
+    required this.title,
     required this.category,
     required this.compactVertical,
     required this.onTap,
@@ -812,6 +826,7 @@ class _RecipeResultCard extends StatefulWidget {
     required this.onFavoriteChanged,
   });
   final CatalogRecipe recipe;
+  final String title;
   final RecipeCategory category;
   final bool compactVertical;
   final ValueChanged<RecipeSearchEntryGeometry?> onTap;
@@ -1050,7 +1065,7 @@ class _RecipeResultCardState extends State<_RecipeResultCard>
         ),
         title: Text(
           key: titleKey,
-          widget.recipe.title,
+          widget.title,
           style: Theme.of(context).textTheme.titleMedium
               ?.copyWith(color: colors.onSurface, fontWeight: FontWeight.w600),
         ),

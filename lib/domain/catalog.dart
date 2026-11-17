@@ -5,7 +5,7 @@ import 'recipe_node.dart';
 /// Изменяется только при изменении данных каталога. По ней локальная БД
 /// понимает, что нужно один раз синхронизировать встроенные записи, вместо
 /// полного удаления и создания каталога при каждом запуске приложения.
-const catalogRevision = 'catalog-v10';
+const catalogRevision = 'catalog-v11';
 
 /// Раздел блюда в каталоге. Значение [storageKey] хранится в локальной БД,
 /// а [title] показывается в поиске и выборе на экране рецепта.
@@ -134,15 +134,41 @@ enum IngredientGroup {
   final String title;
 }
 
+/// Стабильный технический идентификатор встроенного рецепта. В его основе
+/// лежит отдельный ключ каталога, а не отображаемое название, поэтому
+/// переименование блюда не меняет связь с локальными данными. Две части
+/// хеша делают совпадение практически невозможным в пределах каталога.
+String _catalogRecipeId(String catalogKey) {
+  int hash(String source, int seed) {
+    var value = seed;
+    for (final codeUnit in source.codeUnits) {
+      value = (value * 31 + codeUnit) & 0x7fffffff;
+    }
+    return value;
+  }
+
+  final first = hash('povarnya.recipe.v1:$catalogKey', 0x13579bdf);
+  final second = hash('povarnya.recipe.v1:$catalogKey', 0x2468ace);
+  return 'r-${first.toRadixString(16).padLeft(8, '0')}-${second.toRadixString(16).padLeft(8, '0')}';
+}
+
 /// Предустановленный локальный каталог, составленный из обсуждённых рецептов.
 class CatalogRecipe {
   CatalogRecipe({
-    required this.id,
+    required String id,
     required this.title,
     required this.buildSteps,
     this.servings = 2,
     this.detailedSteps = const [],
-  });
+  }) : catalogKey = id,
+       id = _catalogRecipeId(id);
+
+  /// Неизменяемый ключ встроенного каталога. Он нужен только для миграции
+  /// старых баз и сопоставления исходников, но никогда не показывается в UI.
+  final String catalogKey;
+
+  /// Независимый постоянный идентификатор рецепта. Он не связан с названием,
+  /// составом или порциями и остаётся тем же после пользовательской правки.
   final String id;
   final String title;
   final List<RecipeNode> Function() buildSteps;
@@ -174,7 +200,7 @@ class CatalogRecipe {
   }
 
   RecipeCategory get category =>
-      _catalogRecipeCategories[id] ?? RecipeCategory.other;
+      _catalogRecipeCategories[catalogKey] ?? RecipeCategory.other;
 
   /// Признак рассчитывается по составу встроенного рецепта. Это даёт
   /// однозначное начальное значение без дублирования ещё одного большого
@@ -1581,6 +1607,11 @@ class CatalogCards {
     kind: CardKind.text,
     nominative: 'Текст',
   );
+  static const recipeDish = CardDefinition(
+    id: 'text.recipe-dish',
+    kind: CardKind.text,
+    nominative: 'Само блюдо',
+  );
   static const all = [
     prepare,
     cut,
@@ -1760,6 +1791,7 @@ class CatalogCards {
     rollingPin,
     servingPlate,
     freeText,
+    recipeDish,
   ];
 
   /// Быстрый словарь для восстановления дерева рецепта из SQLite.
