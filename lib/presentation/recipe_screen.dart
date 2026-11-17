@@ -1047,6 +1047,11 @@ class _RecipeScreenState extends State<RecipeScreen>
           icon: Icon(_editing ? Icons.visibility : Icons.edit),
         ),
         IconButton(
+          tooltip: 'Кухонная справка',
+          onPressed: () => showRecipeReferenceDialog(context),
+          icon: const Icon(Icons.help_outline),
+        ),
+        IconButton(
           onPressed: widget.onToggleTheme,
           icon: const Icon(Icons.brightness_6),
           tooltip: 'Тема: ${widget.themeLabel}. Сменить тему',
@@ -2851,11 +2856,6 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
                   value: widget.fasting,
                   onChanged: widget.onFastingChanged,
                 ),
-              ),
-              IconButton(
-                tooltip: 'Кухонная справка',
-                onPressed: () => showRecipeReferenceDialog(context),
-                icon: const Icon(Icons.help_outline),
               ),
             ],
           ),

@@ -573,7 +573,11 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
                     if (_showScaleNotice)
                       Positioned(
                         left: 16,
-                        top: 16,
+                        // Сцена ниже масштабируется целиком. Деление
+                        // системного отступа на масштаб оставляет плашку
+                        // физически под строкой состояния Android при любом
+                        // увеличении интерфейса.
+                        top: MediaQuery.paddingOf(context).top / _scale + 16,
                         child: _ScaleNotice(scale: _scale),
                       ),
                   ],
