@@ -141,6 +141,7 @@ class ProjectAnalyzerService {
     await _auditSingleRecipeRenderer(),
     await _auditRecipeNodePersistence(),
     await _auditExternalFlutterSdk(),
+    await _auditSplashAnimationIsolation(),
   ];
 
   ProjectAudit _auditRecipeIngredients() {
@@ -360,11 +361,7 @@ class ProjectAnalyzerService {
 
   Future<ProjectAudit> _auditAnalyzerScope() async {
     final options = await File('$root/analysis_options.yaml').readAsString();
-    const requiredExclusions = [
-      '.dart_tool/**',
-      'Инструментарий/**',
-      'third_party/**',
-    ];
+    const requiredExclusions = ['.dart_tool/**', 'Инструментарий/**'];
     final missing = requiredExclusions
         .where((path) => !options.contains('- $path'))
         .toList();
@@ -439,13 +436,13 @@ class ProjectAnalyzerService {
     final serializerReferences = RegExp(r'\b_addNodeTree\s*\(')
         .allMatches(source)
         .length;
-    final passed = nodeInserts == 1 && serializerReferences == 4;
+    final passed = nodeInserts == 1 && serializerReferences == 5;
     return ProjectAudit(
       title: 'Единая сериализация дерева RecipeNode',
       passed: passed,
       details: passed
-          ? 'Сохранение, заполнение и обновление каталога используют один _addNodeTree.'
-          : 'Ожидалась одна реализация INSERT node и три её вызова; найдено: $nodeInserts и ${serializerReferences - 1}.',
+          ? 'Сохранение, первичное заполнение, обновление и добавление рецептов используют один _addNodeTree.'
+          : 'Ожидалась одна реализация INSERT node и четыре её вызова; найдено: $nodeInserts и ${serializerReferences - 1}.',
     );
   }
 
@@ -468,6 +465,31 @@ class ProjectAnalyzerService {
       details: passed
           ? 'SDK находится в «Среды разработки», а единая конфигурация допускает переопределение пути.'
           : 'Flutter SDK отсутствует по внешнему пути, остался внутри проекта или не задан в общей конфигурации.',
+    );
+  }
+
+  Future<ProjectAudit> _auditSplashAnimationIsolation() async {
+    final pubspec = await File('$root/pubspec.yaml').readAsString();
+    final loadingWidget = await File('$root/lib/startup_loading_video.dart')
+        .readAsString();
+    final localPackage = Directory('$root/third_party/media_kit_video');
+    final mediaKitDependency = RegExp(
+      r'^\s{2}media_kit(?:_video|_libs_video)?:',
+      multiLine: true,
+    ).hasMatch(pubspec);
+    final animation = File('$root/assets/animations/Загрузочный экран.webp');
+    final passed =
+        !mediaKitDependency &&
+        !await localPackage.exists() &&
+        await animation.exists() &&
+        loadingWidget.contains('Image.asset(') &&
+        !loadingWidget.contains('VideoController');
+    return ProjectAudit(
+      title: 'Заставка без нативного видеоплагина',
+      passed: passed,
+      details: passed
+          ? 'Анимация рисуется Flutter из WebP; media_kit и локальный форк не используются.'
+          : 'Обнаружен media_kit, локальный форк, отсутствует WebP или заставка снова зависит от видеоплагина.',
     );
   }
 

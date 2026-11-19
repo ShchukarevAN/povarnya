@@ -6,7 +6,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 
 import 'app_theme.dart';
 import 'data/app_settings.dart';
@@ -21,9 +20,6 @@ import 'startup_loading_video.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // media_kit использует нативный видеодвижок на Linux, Windows и Android.
-  // Его необходимо подготовить до создания первого виджета с видео.
-  MediaKit.ensureInitialized();
   // Первый Flutter-кадр должен появиться сразу. Файлы настроек и база
   // открываются уже под заставкой, чтобы Android не показывал пустое окно.
   runApp(const PovarnyaStartupApp());
@@ -54,8 +50,7 @@ class PovarnyaStartupApp extends StatefulWidget {
     this.applicationBuilder,
   });
 
-  /// Тестовые крючки позволяют проверить ворота запуска без нативного
-  /// видеодвижка и SQLite. В обычном приложении они не задаются.
+  /// Тестовые крючки позволяют проверить ворота запуска без SQLite.
   final Future<void> Function(BuildContext context)? prepareApplication;
   final Widget Function(VoidCallback onFirstCycleCompleted)? loadingBuilder;
   final WidgetBuilder? applicationBuilder;

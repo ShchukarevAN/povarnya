@@ -13,7 +13,6 @@ analyzer:
   exclude:
     - .dart_tool/**
     - Инструментарий/**
-    - third_party/**
     - build/**
     - linux/**
     - android/**

@@ -34,12 +34,18 @@ void main() {
     await tester.pumpAndSettle();
 
     final version = find.textContaining('Версия:');
+    final speech = find.text('Настроить распознавание речи');
     final update = find.text('Проверить обновления');
     expect(version, findsOneWidget);
+    expect(speech, findsOneWidget);
     expect(update, findsOneWidget);
     expect(
-      tester.getTopLeft(update).dy,
+      tester.getTopLeft(speech).dy,
       greaterThan(tester.getTopLeft(version).dy),
+    );
+    expect(
+      tester.getTopLeft(update).dy,
+      greaterThan(tester.getTopLeft(speech).dy),
     );
   });
 
@@ -53,7 +59,7 @@ void main() {
         home: UpdateScreen(
           loadingBuilder: (onFirstCycleCompleted) {
             onFirstCycleCompleted();
-            return const PovarnyaLoadingVideo(initializePlayer: false);
+            return const PovarnyaLoadingVideo(showAnimation: false);
           },
           serviceBuilder: (onProgress, onLog) => UpdateService(
             client: client,

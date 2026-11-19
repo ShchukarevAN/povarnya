@@ -34,6 +34,12 @@ flutter build linux --release
 
 Готовый бинарный файл появится в `build/linux/x64/release/bundle/povarnya`.
 
+Сборки Linux и APK содержат офлайн-модули Zipformer2, Silero TTS v5.6
+Russian и Hunspell с русским словарём. Zipformer2 обслуживает голосовой
+ввод и команды готовки, Silero озвучивает шаги, а Hunspell проверяет
+русский текст. Состав, лицензии и контрольные суммы описаны в
+`assets/modules/README.md`.
+
 Сборка Android release:
 
 ```bash
@@ -41,6 +47,10 @@ flutter build apk --release
 ```
 
 Для GitHub Release переименуйте готовый APK в `povarnya-android.apk`. Тег релиза содержит только обычную версию приложения, например `v0.6.22`; внутренний Android `versionCode` в тег не добавляется.
+
+Версия в `pubspec.yaml`, интерфейсе и документации всегда записывается строго
+как `0.x.y`. Формат `0.x.y+N` запрещён; Android вычисляет внутренний
+`versionCode` отдельно по формуле `x * 1000 + y`.
 
 ## Документация
 

@@ -35,8 +35,28 @@ void main() {
     ],
   };
 
+  http.Response sourceResponse(String version) => jsonResponse({
+    'encoding': 'base64',
+    'content': base64.encode(
+      utf8.encode('name: povarnya\nversion: $version\n'),
+    ),
+  }, 200);
+
+  MockClient githubClient({
+    String tag = 'v0.6.0',
+    String sourceVersion = '0.6.0',
+  }) => MockClient((request) async {
+    if (request.url.toString() == latestUrl) {
+      return jsonResponse(releaseJson(tag: tag), 200);
+    }
+    if (request.url.path.endsWith('/contents/pubspec.yaml')) {
+      return sourceResponse(sourceVersion);
+    }
+    throw StateError('Unexpected request: ${request.url}');
+  });
+
   test('читает обычную версию и APK из GitHub Release', () async {
-    final client = MockClient((_) async => jsonResponse(releaseJson(), 200));
+    final client = githubClient();
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
@@ -48,6 +68,7 @@ void main() {
 
     expect(result.updateAvailable, isTrue);
     expect(result.release.version, '0.6.0');
+    expect(result.release.versionCode, 6000);
     expect(result.release.asset.sha256, apkDigest);
     service.close();
   });
@@ -60,6 +81,9 @@ void main() {
     final client = MockClient((request) async {
       if (request.url.toString() == latestUrl) {
         return jsonResponse(releaseJson(), 200);
+      }
+      if (request.url.path.endsWith('/contents/pubspec.yaml')) {
+        return sourceResponse('0.6.0');
       }
       return http.Response.bytes(apkBytes, 200);
     });
@@ -132,9 +156,7 @@ void main() {
   });
 
   test('сравнивает компоненты версии как числа', () async {
-    final client = MockClient(
-      (_) async => jsonResponse(releaseJson(tag: 'v0.10.0'), 200),
-    );
+    final client = githubClient(tag: 'v0.10.0', sourceVersion: '0.10.0');
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
@@ -148,7 +170,7 @@ void main() {
   });
 
   test('не предлагает уже установленную версию', () async {
-    final client = MockClient((_) async => jsonResponse(releaseJson(), 200));
+    final client = githubClient();
     final service = UpdateService(
       client: client,
       latestReleaseUrl: latestUrl,
@@ -158,6 +180,55 @@ void main() {
     final result = await service.check();
 
     expect(result.updateAvailable, isFalse);
+    service.close();
+  });
+
+  test('блокирует релиз, чей тег указывает на другую версию', () async {
+    final client = githubClient(sourceVersion: '0.7.8');
+    final service = UpdateService(
+      client: client,
+      latestReleaseUrl: latestUrl,
+      installedVersionOverride: '0.5.0',
+    );
+
+    await expectLater(
+      service.check(),
+      throwsA(
+        isA<UpdateFailure>()
+            .having(
+              (failure) => failure.code,
+              'code',
+              'RELEASE_SOURCE_VERSION_MISMATCH',
+            )
+            .having(
+              (failure) => failure.message,
+              'message',
+              allOf(contains('0.6.0'), contains('0.7.8')),
+            ),
+      ),
+    );
+    service.close();
+  });
+
+  test('отвергает суффикс build metadata в pubspec выпуска', () async {
+    final invalidVersion = <String>['0.6.0', '10'].join('+');
+    final client = githubClient(sourceVersion: invalidVersion);
+    final service = UpdateService(
+      client: client,
+      latestReleaseUrl: latestUrl,
+      installedVersionOverride: '0.5.0',
+    );
+
+    await expectLater(
+      service.check(),
+      throwsA(
+        isA<UpdateFailure>().having(
+          (failure) => failure.code,
+          'code',
+          'RELEASE_SOURCE_VERSION_INVALID',
+        ),
+      ),
+    );
     service.close();
   });
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_version.dart';
 import 'data/app_settings.dart';
 import 'data/recipe_database.dart';
+import 'presentation/speech_calibration_screen.dart';
 import 'update/update_screen.dart';
 
 /// Показывает настройки непосредственно под кнопкой, не перехватывая
@@ -38,6 +39,12 @@ Future<void> showSettingsPopover(BuildContext buttonContext) async {
   );
   if (!buttonContext.mounted || action == null) return;
   switch (action) {
+    case _SettingsAction.calibrateSpeech:
+      await Navigator.of(buttonContext, rootNavigator: true).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => const SpeechCalibrationScreen(),
+        ),
+      );
     case _SettingsAction.checkUpdates:
       await Navigator.of(buttonContext, rootNavigator: true).push<void>(
         MaterialPageRoute<void>(builder: (_) => const UpdateScreen()),
@@ -105,13 +112,18 @@ Future<bool> _confirmDestructiveAction(
     ) ??
     false;
 
-enum _SettingsAction { checkUpdates, deletePhotos, deleteAllData }
+enum _SettingsAction {
+  calibrateSpeech,
+  checkUpdates,
+  deletePhotos,
+  deleteAllData,
+}
 
 class _SettingsMenuEntry extends PopupMenuEntry<_SettingsAction> {
   const _SettingsMenuEntry();
 
   @override
-  double get height => 278;
+  double get height => 338;
 
   @override
   bool represents(_SettingsAction? value) => false;
@@ -136,6 +148,14 @@ class _SettingsMenuEntryState extends State<_SettingsMenuEntry> {
               style: Theme.of(context).textTheme.bodyLarge
                   ?.copyWith(color: Theme.of(context).colorScheme.onSurface),
             ),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            key: const ValueKey('speech-calibration-settings-action'),
+            onPressed: () =>
+                Navigator.of(context).pop(_SettingsAction.calibrateSpeech),
+            icon: const Icon(Icons.record_voice_over),
+            label: const Text('Настроить распознавание речи'),
           ),
           const SizedBox(height: 8),
           FilledButton.tonalIcon(

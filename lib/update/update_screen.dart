@@ -9,7 +9,14 @@ import '../startup_loading_video.dart';
 import 'update_installer.dart';
 import 'update_service.dart';
 
-enum _UpdateViewState { working, upToDate, permission, installer, failed }
+enum _UpdateViewState {
+  working,
+  upToDate,
+  ready,
+  permission,
+  installer,
+  failed,
+}
 
 typedef UpdateServiceBuilder = UpdateService Function(
   UpdateProgressCallback onProgress,
@@ -42,6 +49,7 @@ class _UpdateScreenState extends State<UpdateScreen>
   UpdateCheckResult? _checkResult;
   UpdateFailure? _failure;
   File? _downloadedApk;
+  ApkInspection? _apkInspection;
   bool _openingPermissionSettings = false;
   String? _diagnosticFilePath;
   Completer<void> _loadingCycle = Completer<void>();
@@ -95,6 +103,7 @@ class _UpdateScreenState extends State<UpdateScreen>
       _failure = null;
       _checkResult = null;
       _downloadedApk = null;
+      _apkInspection = null;
       _progress = const UpdateProgress(
         UpdateStage.checking,
         'Подключаюсь к GitHub…',
@@ -124,7 +133,28 @@ class _UpdateScreenState extends State<UpdateScreen>
       if (!mounted) return;
       _downloadedApk = apk;
       _addDiagnostic('APK сохранён: ${apk.path}');
-      await _continueAfterPermission();
+      _handleProgress(
+        const UpdateProgress(
+          UpdateStage.verifying,
+          'Сверяю пакет, версию, код и подпись APK…',
+        ),
+      );
+      final inspection = await _installer.inspect(
+        apk,
+        expectedVersionName: check.release.version,
+        expectedVersionCode: check.release.versionCode,
+      );
+      if (!mounted) return;
+      _apkInspection = inspection;
+      _addDiagnostic(
+        'APK проверен: ${inspection.packageName}; '
+        'версия ${inspection.versionName}; '
+        'внутренний код ${inspection.versionCode}; '
+        'подпись совпадает.',
+      );
+      await _persistDiagnostics();
+      await _waitForLoadingCycle();
+      if (mounted) setState(() => _state = _UpdateViewState.ready);
     } catch (error, stackTrace) {
       await _showFailure(error, stackTrace);
     }
@@ -132,7 +162,8 @@ class _UpdateScreenState extends State<UpdateScreen>
 
   Future<void> _continueAfterPermission() async {
     final apk = _downloadedApk;
-    if (apk == null) return;
+    final check = _checkResult;
+    if (apk == null || check == null) return;
     try {
       final allowed = await _installer.canRequestInstall();
       if (!allowed) {
@@ -161,7 +192,11 @@ class _UpdateScreenState extends State<UpdateScreen>
           );
         });
       }
-      await _installer.install(apk);
+      await _installer.install(
+        apk,
+        expectedVersionName: check.release.version,
+        expectedVersionCode: check.release.versionCode,
+      );
       _addDiagnostic('Системный установщик Android запущен.');
       await _persistDiagnostics();
       await _waitForLoadingCycle();
@@ -254,6 +289,7 @@ class _UpdateScreenState extends State<UpdateScreen>
                   child: switch (_state) {
                     _UpdateViewState.working => const SizedBox.shrink(),
                     _UpdateViewState.upToDate => _upToDateView(),
+                    _UpdateViewState.ready => _readyView(),
                     _UpdateViewState.permission => _permissionView(),
                     _UpdateViewState.installer => _installerView(),
                     _UpdateViewState.failed => _failureView(),
@@ -264,16 +300,52 @@ class _UpdateScreenState extends State<UpdateScreen>
     );
   }
 
+  Widget _readyView() {
+    final check = _checkResult!;
+    final inspection = _apkInspection!;
+    return _UpdateCenteredView(
+      key: const ValueKey('ready'),
+      icon: Icons.verified_user_outlined,
+      title: 'APK проверен перед установкой',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'На телефоне: ${check.installedVersion}\n'
+            'GitHub и исходники: ${check.release.version}\n'
+            'Внутри APK: ${inspection.versionName}',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Пакет ${inspection.packageName} и его подпись '
+            'совпадают с установленной «Поварней».',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _continueAfterPermission,
+            icon: const Icon(Icons.install_mobile_outlined),
+            label: const Text('Установить проверенное обновление'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _returnToApplication,
+            child: const Text('Отменить и вернуться'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _workingView() => Semantics(
     key: const ValueKey('working'),
     label: 'Проверка обновлений. ${_progress.message}',
     liveRegion: true,
     child:
         widget.loadingBuilder?.call(_markLoadingCycleCompleted) ??
-        PovarnyaLoadingVideo(
-          loop: true,
-          onFirstCycleCompleted: _markLoadingCycleCompleted,
-        ),
+        PovarnyaLoadingVideo(onFirstCycleCompleted: _markLoadingCycleCompleted),
   );
 
   Widget _upToDateView() {

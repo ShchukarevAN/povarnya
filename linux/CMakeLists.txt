@@ -74,6 +74,16 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Ship Hunspell with the Linux bundle for the Dart FFI spell-check service.
+# BUILD_SHARED_LIBS is scoped to the vendored project so existing Flutter
+# targets retain their original linkage.
+set(BUILD_SHARED_LIBS ON)
+add_subdirectory(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/hunspell"
+  "${CMAKE_BINARY_DIR}/hunspell"
+)
+unset(BUILD_SHARED_LIBS)
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

@@ -11,6 +11,7 @@ import '../domain/catalog.dart';
 import '../domain/catalog_search.dart';
 import '../domain/recipe_node.dart';
 import 'recipe_screen.dart' show moduleIcon;
+import 'speech_input_button.dart';
 
 List<CatalogRecipe> sortRecipesAlphabetically(Iterable<CatalogRecipe> recipes) {
   return searchAndSortByLabel(
@@ -86,6 +87,10 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
 
   final Set<String> _selectedIngredients = {};
   final Set<String> _excludedIngredients = {};
+  final TextEditingController _titleQueryController = TextEditingController();
+  final TextEditingController _filterQueryController = TextEditingController();
+  TextEditingValue? _titleBeforeSpeech;
+  TextEditingValue? _filterBeforeSpeech;
   String _titleQuery = '';
   String _filterQuery = '';
   late bool _compactFilterIngredients;
@@ -112,6 +117,81 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     _loadRecipeCategories();
     _loadRecipeFasting();
     _loadRecipeTitles();
+  }
+
+  @override
+  void dispose() {
+    _titleQueryController.dispose();
+    _filterQueryController.dispose();
+    super.dispose();
+  }
+
+  void _startTitleSpeech() {
+    _titleBeforeSpeech = _titleQueryController.value;
+  }
+
+  void _previewRecognizedTitle(String text) {
+    _useRecognizedTitle(text, isFinal: false);
+  }
+
+  void _commitRecognizedTitle(String text) {
+    _useRecognizedTitle(text, isFinal: true);
+  }
+
+  void _useRecognizedTitle(String text, {required bool isFinal}) {
+    final query = text.trim();
+    if (query.isEmpty) return;
+    _titleQueryController.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+      composing: isFinal
+          ? TextRange.empty
+          : TextRange(start: 0, end: query.length),
+    );
+    setState(() => _titleQuery = query);
+    if (isFinal) _titleBeforeSpeech = null;
+  }
+
+  void _cancelTitleSpeech() {
+    final previous = _titleBeforeSpeech;
+    _titleBeforeSpeech = null;
+    if (previous == null) return;
+    _titleQueryController.value = previous;
+    setState(() => _titleQuery = previous.text);
+  }
+
+  void _startFilterSpeech() {
+    _filterBeforeSpeech = _filterQueryController.value;
+  }
+
+  void _previewRecognizedFilter(String text) {
+    _useRecognizedFilter(text, isFinal: false);
+  }
+
+  void _commitRecognizedFilter(String text) {
+    _useRecognizedFilter(text, isFinal: true);
+  }
+
+  void _useRecognizedFilter(String text, {required bool isFinal}) {
+    final query = text.trim();
+    if (query.isEmpty) return;
+    _filterQueryController.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+      composing: isFinal
+          ? TextRange.empty
+          : TextRange(start: 0, end: query.length),
+    );
+    setState(() => _filterQuery = query);
+    if (isFinal) _filterBeforeSpeech = null;
+  }
+
+  void _cancelFilterSpeech() {
+    final previous = _filterBeforeSpeech;
+    _filterBeforeSpeech = null;
+    if (previous == null) return;
+    _filterQueryController.value = previous;
+    setState(() => _filterQuery = previous.text);
   }
 
   Future<void> _loadRecipeTitles() async {
@@ -330,6 +410,7 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                     ),
                     SizedBox(height: compactVertical ? 8 : 24),
                     TextField(
+                      controller: _titleQueryController,
                       onChanged: (value) => setState(() => _titleQuery = value),
                       decoration: InputDecoration(
                         filled: true,
@@ -346,32 +427,14 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                               .colorScheme
                               .onPrimaryContainer,
                         ),
-                        suffixIcon: IconButton(
-                          key: const ValueKey('recipe-order-toggle'),
-                          constraints: Theme.of(context)
-                              .inputDecorationTheme
-                              .suffixIconConstraints,
-                          padding: EdgeInsets.zero,
-                          visualDensity: VisualDensity.compact,
-                          tooltip: _randomOrder
-                              ? 'Случайный порядок: включён'
-                              : 'Алфавитный порядок: включён',
-                          onPressed: _toggleResultOrder,
-                          icon: _randomOrder
-                              ? Icon(
-                                  Icons.shuffle,
-                                  color: Theme.of(context).colorScheme.primary,
-                                )
-                              : Text(
-                                  'А→Я',
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                ),
+                        suffixIcon: SpeechInputButton(
+                          key: const ValueKey('recipe-search-microphone'),
+                          color: Theme.of(context).colorScheme.primary,
+                          tooltip: 'Назвать лакомство',
+                          onRecognitionStarted: _startTitleSpeech,
+                          onPartialRecognized: _previewRecognizedTitle,
+                          onRecognized: _commitRecognizedTitle,
+                          onRecognitionCanceled: _cancelTitleSpeech,
                         ),
                       ),
                     ),
@@ -394,6 +457,26 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                               _fastingFilter = selected ? fasting : null;
                             }),
                           ),
+                        Tooltip(
+                          message: _randomOrder
+                              ? 'Переключить на алфавитный порядок'
+                              : 'Переключить на случайный порядок',
+                          child: FilterChip(
+                            key: const ValueKey('recipe-order-toggle'),
+                            avatar: Icon(
+                              _randomOrder
+                                  ? Icons.shuffle
+                                  : Icons.sort_by_alpha,
+                              size: 18,
+                            ),
+                            label: Text(
+                              _randomOrder ? 'Случайно' : 'По алфавиту',
+                            ),
+                            selected: _randomOrder,
+                            showCheckmark: false,
+                            onSelected: (_) => _toggleResultOrder(),
+                          ),
+                        ),
                       ],
                     ),
                     SizedBox(height: compactVertical ? 8 : 28),
@@ -491,26 +574,54 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
         ),
         SizedBox(height: compactVertical ? 4 : 16),
         TextField(
+          controller: _filterQueryController,
           onChanged: (value) => setState(() => _filterQuery = value),
           decoration: InputDecoration(
             isDense: true,
             prefixIcon: const Icon(Icons.search),
             labelText: 'Найти ингредиент',
-            suffixIcon: IconButton(
-              constraints: Theme.of(context)
+            suffixIconConstraints: BoxConstraints.tightFor(
+              width:
+                  (Theme.of(context)
+                          .inputDecorationTheme
+                          .suffixIconConstraints
+                          ?.maxWidth ??
+                      48) *
+                  2,
+              height: Theme.of(context)
                   .inputDecorationTheme
-                  .suffixIconConstraints,
-              padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
-              tooltip: _compactFilterIngredients
-                  ? 'Показывать названия ингредиентов'
-                  : 'Показывать пиктограммы ингредиентов',
-              onPressed: _toggleCompactFilterIngredients,
-              icon: Icon(
-                _compactFilterIngredients
-                    ? Icons.view_stream_outlined
-                    : Icons.grid_view_outlined,
-              ),
+                  .suffixIconConstraints
+                  ?.maxHeight,
+            ),
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SpeechInputButton(
+                  key: const ValueKey('ingredient-filter-microphone'),
+                  color: Theme.of(context).colorScheme.primary,
+                  tooltip: 'Назвать ингредиент',
+                  onRecognitionStarted: _startFilterSpeech,
+                  onPartialRecognized: _previewRecognizedFilter,
+                  onRecognized: _commitRecognizedFilter,
+                  onRecognitionCanceled: _cancelFilterSpeech,
+                ),
+                IconButton(
+                  constraints: Theme.of(context)
+                      .inputDecorationTheme
+                      .suffixIconConstraints,
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  tooltip: _compactFilterIngredients
+                      ? 'Показывать названия ингредиентов'
+                      : 'Показывать пиктограммы ингредиентов',
+                  onPressed: _toggleCompactFilterIngredients,
+                  icon: Icon(
+                    _compactFilterIngredients
+                        ? Icons.view_stream_outlined
+                        : Icons.grid_view_outlined,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

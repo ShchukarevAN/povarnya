@@ -4,6 +4,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+fun androidVersionCode(version: String): Int {
+    val component = "(0|[1-9]\\d{0,2})"
+    val match = Regex("^0\\.$component\\.$component$").matchEntire(version)
+        ?: error("Version must have the strict form 0.x.y: $version")
+    val code = match.groupValues[1].toInt() * 1000 + match.groupValues[2].toInt()
+    require(code > 0) { "Version 0.0.0 is not valid for Android" }
+    return code
+}
+
 android {
     namespace = "ru.shchukarevan.povarnya"
     compileSdk = flutter.compileSdkVersion
@@ -21,12 +30,16 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
-        versionCode = flutter.versionCode
+        // versionCode is an internal Android field, not part of the public
+        // 0.x.y version. Keep this formula in sync with update_service.dart.
+        versionCode = androidVersionCode(flutter.versionName)
         versionName = flutter.versionName
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
     }
 
     buildTypes {
@@ -34,6 +47,14 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    // Build Hunspell into the APK for the Dart FFI spell-check service.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 }

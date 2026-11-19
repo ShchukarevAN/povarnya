@@ -20,6 +20,9 @@ import '../domain/catalog_search.dart';
 import '../domain/nutrition.dart';
 import '../domain/recipe_node.dart';
 import '../domain/recipe_renderer.dart';
+import '../services/hunspell_spell_check_service.dart';
+import '../services/recipe_voice_guide.dart';
+import 'speech_input_button.dart';
 
 class _NodeDrag {
   const _NodeDrag(this.node, this.source);
@@ -485,6 +488,7 @@ class RecipeScreen extends StatefulWidget {
 class _RecipeScreenState extends State<RecipeScreen>
     with SingleTickerProviderStateMixin {
   final RecipeRenderer _renderer = const RecipeRenderer();
+  late final RecipeVoiceGuide _voiceGuide;
   // При входе в полноэкранный режим раскладка может смениться с Column на Row.
   // GlobalKey сохраняет центральный холст и активное поле ввода при переносе.
   final _recipeCanvasKey = GlobalKey<_RecipeCanvasState>();
@@ -545,6 +549,8 @@ class _RecipeScreenState extends State<RecipeScreen>
   String? _recipePhotoPath;
   Uint8List? _recipePhotoBytes;
   bool _savingRecipePhoto = false;
+  bool _voiceGuideActive = false;
+  bool _disposing = false;
   late String _title = widget.initialRecipe?.title ?? 'Новый рецепт';
 
   @override
@@ -571,6 +577,23 @@ class _RecipeScreenState extends State<RecipeScreen>
     _rightPanelFraction = AppSettings().rightPanelFraction;
     _bottomPanelFraction = AppSettings().bottomPanelFraction;
     _compactSandboxModules = AppSettings().compactSandboxModules;
+    _voiceGuide = RecipeVoiceGuide(
+      onActiveChanged: (active) {
+        if (!mounted || _disposing) return;
+        setState(() => _voiceGuideActive = active);
+      },
+      onError: (message) {
+        if (!mounted || _disposing) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 8),
+              content: Text(message),
+            ),
+          );
+      },
+    );
     _loadSavedRecipe();
   }
 
@@ -655,6 +678,7 @@ class _RecipeScreenState extends State<RecipeScreen>
   }
 
   Future<void> _saveAndClose() async {
+    await _voiceGuide.stop();
     final saved = await _saveChangesIfNeeded();
     if (saved == null) return;
     if (mounted) {
@@ -735,6 +759,8 @@ class _RecipeScreenState extends State<RecipeScreen>
 
   @override
   void dispose() {
+    _disposing = true;
+    unawaited(_voiceGuide.dispose());
     HardwareKeyboard.instance.removeHandler(_handleKeyboardEvent);
     _modeTransition.dispose();
     _backSwipeController.dispose();
@@ -971,12 +997,44 @@ class _RecipeScreenState extends State<RecipeScreen>
   /// шаг, который ListView создаст позже, попадает в ту же фазу перехода, что
   /// уже видимые шаги, и экран не разделяется на старую и новую половины.
   void _toggleEditingWithTransition() {
+    if (!_editing && _voiceGuideActive) unawaited(_voiceGuide.stop());
     setState(() {
       _modeTransitionFromEditing = _editing;
       if (_editing) _revealPhotoAfterModeTransition = false;
       _editing = !_editing;
       _modeTransition.forward(from: 0);
     });
+  }
+
+  void _toggleVoiceGuide() {
+    if (_voiceGuideActive) {
+      unawaited(_voiceGuide.stop());
+      return;
+    }
+    final steps = _steps
+        .map(
+          (step) => _renderer
+              .renderParts(
+                step,
+                servings: _servings,
+                recipeMultiplier: _recipeMultiplier,
+              )
+              .map((part) => part.text)
+              .join(),
+        )
+        .map((text) => text.trim())
+        .where((text) => text.isNotEmpty)
+        .map((text) => RegExp(r'[.!?…]$').hasMatch(text) ? text : '$text.')
+        .toList(growable: false);
+    if (steps.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('В рецепте пока нет шагов для озвучивания.'),
+        ),
+      );
+      return;
+    }
+    unawaited(_voiceGuide.start(steps));
   }
 
   void _startModeDrag() {
@@ -1035,6 +1093,20 @@ class _RecipeScreenState extends State<RecipeScreen>
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
+      centerTitle: true,
+      title: _editing
+          ? null
+          : IconButton(
+              onPressed: _toggleVoiceGuide,
+              tooltip: _voiceGuideActive
+                  ? 'Остановить голосовое ведение'
+                  : 'Начать готовку с голосовым ведением',
+              icon: Icon(
+                _voiceGuideActive
+                    ? Icons.stop_circle_outlined
+                    : Icons.play_arrow_rounded,
+              ),
+            ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
         tooltip: 'К поиску',
@@ -1517,7 +1589,7 @@ class _RecipeNotes extends StatelessWidget {
               opacity: animation,
               child: SizeTransition(
                 sizeFactor: animation,
-                axisAlignment: -1,
+                alignment: AlignmentDirectional.topStart,
                 child: child,
               ),
             ),
@@ -2042,6 +2114,8 @@ class _CardLibrary extends StatefulWidget {
 }
 
 class _CardLibraryState extends State<_CardLibrary> {
+  final TextEditingController _queryController = TextEditingController();
+  TextEditingValue? _queryBeforeSpeech;
   String _query = '';
 
   static const _characteristicIds = {'characteristic.shape'};
@@ -2110,6 +2184,46 @@ class _CardLibraryState extends State<_CardLibrary> {
       .where((card) => !_applianceIds.contains(card.id))
       .toList();
 
+  @override
+  void dispose() {
+    _queryController.dispose();
+    super.dispose();
+  }
+
+  void _startQuerySpeech() {
+    _queryBeforeSpeech = _queryController.value;
+  }
+
+  void _previewRecognizedQuery(String text) {
+    _useRecognizedQuery(text, isFinal: false);
+  }
+
+  void _commitRecognizedQuery(String text) {
+    _useRecognizedQuery(text, isFinal: true);
+  }
+
+  void _useRecognizedQuery(String text, {required bool isFinal}) {
+    final query = text.trim();
+    if (query.isEmpty) return;
+    _queryController.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+      composing: isFinal
+          ? TextRange.empty
+          : TextRange(start: 0, end: query.length),
+    );
+    setState(() => _query = query);
+    if (isFinal) _queryBeforeSpeech = null;
+  }
+
+  void _cancelQuerySpeech() {
+    final previous = _queryBeforeSpeech;
+    _queryBeforeSpeech = null;
+    if (previous == null) return;
+    _queryController.value = previous;
+    setState(() => _query = previous.text);
+  }
+
   List<CardDefinition> _matching(List<CardDefinition> cards) {
     final query = _query.trim().toLowerCase();
     if (query.isEmpty) return cards;
@@ -2149,9 +2263,18 @@ class _CardLibraryState extends State<_CardLibrary> {
             SizedBox(height: widget.compactVertical ? 4 : 12),
             SearchBar(
               key: const ValueKey('sandbox-module-search'),
+              controller: _queryController,
               onChanged: (query) => setState(() => _query = query),
               hintText: 'Поиск карточек',
               trailing: [
+                SpeechInputButton(
+                  key: const ValueKey('sandbox-module-microphone'),
+                  tooltip: 'Назвать модуль',
+                  onRecognitionStarted: _startQuerySpeech,
+                  onPartialRecognized: _previewRecognizedQuery,
+                  onRecognized: _commitRecognizedQuery,
+                  onRecognitionCanceled: _cancelQuerySpeech,
+                ),
                 IconButton(
                   key: const ValueKey('sandbox-display-mode'),
                   onPressed: widget.onToggleCompactModules,
@@ -3973,9 +4096,9 @@ class _FreeTextLabel extends StatefulWidget {
 }
 
 class _FreeTextLabelState extends State<_FreeTextLabel> {
-  late final TextEditingController _controller = TextEditingController(
-    text: widget.node.text ?? '',
-  );
+  late final HunspellTextEditingController _controller =
+      HunspellTextEditingController(text: widget.node.text ?? '');
+  TextEditingValue? _textBeforeSpeech;
 
   @override
   void dispose() {
@@ -3983,21 +4106,89 @@ class _FreeTextLabelState extends State<_FreeTextLabel> {
     super.dispose();
   }
 
+  void _startSpeechInput() {
+    _textBeforeSpeech = _controller.value;
+  }
+
+  void _previewRecognizedText(String text) {
+    _insertRecognizedText(text, isFinal: false);
+  }
+
+  void _commitRecognizedText(String text) {
+    _insertRecognizedText(text, isFinal: true);
+  }
+
+  void _cancelSpeechInput() {
+    final previous = _textBeforeSpeech;
+    _textBeforeSpeech = null;
+    if (previous == null) return;
+    _controller.value = previous;
+    setState(() => widget.node.text = previous.text);
+  }
+
+  void _insertRecognizedText(String recognizedText, {required bool isFinal}) {
+    var insertion = recognizedText.trim();
+    if (insertion.isEmpty) return;
+    final value = _textBeforeSpeech ?? _controller.value;
+    final selection = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    final start = selection.start.clamp(0, value.text.length);
+    final end = selection.end.clamp(start, value.text.length);
+    if (start > 0 && !RegExp(r'\s').hasMatch(value.text[start - 1])) {
+      insertion = ' $insertion';
+    }
+    if (end < value.text.length && !RegExp(r'\s').hasMatch(value.text[end])) {
+      insertion = '$insertion ';
+    }
+    var updated = value.text.replaceRange(start, end, insertion);
+    if (updated.length > freeTextMaxLength) {
+      updated = updated.substring(0, freeTextMaxLength);
+    }
+    final caret = (start + insertion.length).clamp(0, updated.length);
+    _controller.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: caret),
+      composing: isFinal || caret <= start
+          ? TextRange.empty
+          : TextRange(start: start, end: caret),
+    );
+    setState(() => widget.node.text = updated);
+    if (isFinal) _textBeforeSpeech = null;
+  }
+
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: _widthForCurrentText(context),
-    child: TextField(
-      controller: _controller,
-      style: widget.style,
-      maxLength: freeTextMaxLength,
-      onChanged: (value) => setState(() => widget.node.text = value),
-      decoration: const InputDecoration(
-        isDense: true,
-        hintText: 'Введите текст',
-        counterText: '',
+  Widget build(BuildContext context) {
+    _controller.misspelledTextStyle = TextStyle(
+      decoration: TextDecoration.underline,
+      decorationStyle: TextDecorationStyle.wavy,
+      decorationColor: Theme.of(context).colorScheme.error,
+      decorationThickness: 1.5,
+    );
+    return SizedBox(
+      width: _widthForCurrentText(context),
+      child: TextField(
+        controller: _controller,
+        style: widget.style,
+        maxLength: freeTextMaxLength,
+        hintLocales: const [Locale('ru', 'RU')],
+        onChanged: (value) => setState(() => widget.node.text = value),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Введите текст',
+          counterText: '',
+          suffixIcon: SpeechInputButton(
+            key: const ValueKey('free-text-microphone'),
+            tooltip: 'Продиктовать текст',
+            onRecognitionStarted: _startSpeechInput,
+            onPartialRecognized: _previewRecognizedText,
+            onRecognized: _commitRecognizedText,
+            onRecognitionCanceled: _cancelSpeechInput,
+          ),
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   double _widthForCurrentText(BuildContext context) {
     final style = widget.style ?? DefaultTextStyle.of(context).style;
@@ -4007,7 +4198,7 @@ class _FreeTextLabelState extends State<_FreeTextLabel> {
       textDirection: Directionality.of(context),
       maxLines: 1,
     )..layout();
-    return (painter.width + 38).clamp(88, 520).toDouble();
+    return (painter.width + 78).clamp(128, 560).toDouble();
   }
 }
 
@@ -4280,7 +4471,7 @@ class _RenderedStep extends StatelessWidget {
                   opacity: animation,
                   child: SizeTransition(
                     axis: Axis.horizontal,
-                    axisAlignment: -1,
+                    alignment: AlignmentDirectional.topStart,
                     sizeFactor: animation,
                     child: child,
                   ),

@@ -44,6 +44,7 @@ class UpdateRelease {
   const UpdateRelease({
     required this.tag,
     required this.version,
+    required this.versionCode,
     required this.name,
     required this.notes,
     required this.asset,
@@ -51,6 +52,7 @@ class UpdateRelease {
 
   final String tag;
   final String version;
+  final int versionCode;
   final String name;
   final String notes;
   final UpdateAsset asset;
@@ -70,17 +72,22 @@ class UpdateCheckResult {
 }
 
 typedef _VersionParts = ({int major, int minor, int patch});
+typedef _TaggedVersion = ({String name, int code});
 
-_VersionParts? _parseVersion(String value, {bool allowVPrefix = false}) {
-  final prefix = allowVPrefix ? 'v?' : '';
-  final match = RegExp('^$prefix(\\d+)\\.(\\d+)\\.(\\d+)\$').firstMatch(value);
+_VersionParts? _parseVersion(String value, {bool withVPrefix = false}) {
+  final prefix = withVPrefix ? 'v' : '';
+  const component = r'(0|[1-9]\d{0,2})';
+  final match = RegExp('^${prefix}0\\.$component\\.$component\$')
+      .firstMatch(value);
   if (match == null) return null;
-  return (
-    major: int.parse(match.group(1)!),
-    minor: int.parse(match.group(2)!),
-    patch: int.parse(match.group(3)!),
-  );
+  final minor = int.parse(match.group(1)!);
+  final patch = int.parse(match.group(2)!);
+  if (minor == 0 && patch == 0) return null;
+  return (major: 0, minor: minor, patch: patch);
 }
+
+int _androidVersionCode(_VersionParts version) =>
+    version.minor * 1000 + version.patch;
 
 int _compareVersions(String left, String right) {
   final leftParts = _parseVersion(left)!;
@@ -267,7 +274,7 @@ class UpdateService {
       );
     }
 
-    final releaseParts = _parseVersion(tag, allowVPrefix: true);
+    final releaseParts = _parseVersion(tag, withVPrefix: true);
     if (releaseParts == null) {
       throw UpdateFailure(
         code: 'RELEASE_TAG_INVALID',
@@ -279,6 +286,21 @@ class UpdateService {
     }
     final releaseVersion =
         '${releaseParts.major}.${releaseParts.minor}.${releaseParts.patch}';
+    final taggedVersion = await _readTaggedVersion(uri, tag);
+    if (taggedVersion.name != releaseVersion) {
+      throw UpdateFailure(
+        code: 'RELEASE_SOURCE_VERSION_MISMATCH',
+        title: 'Выпуск собран из другой версии',
+        message:
+            'Метка релиза обещает $releaseVersion, '
+            'но в исходниках тега указана ${taggedVersion.name}.',
+        suggestion: 'Не устанавливайте APK. Пересоберите и переопубликуйте GitHub Release.',
+        technicalDetails:
+            'tag=$tag\nreleaseVersion=$releaseVersion\n'
+            'sourceVersion=${taggedVersion.name}\n'
+            'sourceVersionCode=${taggedVersion.code}',
+      );
+    }
 
     Map<String, Object?>? assetJson;
     final availableNames = <String>[];
@@ -340,6 +362,7 @@ class UpdateService {
     final release = UpdateRelease(
       tag: tag,
       version: releaseVersion,
+      versionCode: taggedVersion.code,
       name: json['name'] is String ? json['name']! as String : tag,
       notes: json['body'] is String ? json['body']! as String : '',
       asset: UpdateAsset(
@@ -349,11 +372,91 @@ class UpdateService {
         sha256: digest,
       ),
     );
-    onLog?.call('Установлено $installedVersion; на GitHub ${release.tag}.');
+    onLog?.call(
+      'Установлено $installedVersion; на GitHub ${release.tag}; '
+      'исходники ${release.version}; внутренний код ${release.versionCode}.',
+    );
     return UpdateCheckResult(
       installedVersion: installedVersion,
       release: release,
     );
+  }
+
+  Future<_TaggedVersion> _readTaggedVersion(
+    Uri latestReleaseUri,
+    String tag,
+  ) async {
+    final segments = latestReleaseUri.pathSegments;
+    final sourceUri = latestReleaseUri.replace(
+      pathSegments: [
+        ...segments.take(segments.length - 2),
+        'contents',
+        'pubspec.yaml',
+      ],
+      queryParameters: {'ref': tag},
+    );
+    _progress(UpdateStage.checking, 'Сверяю версию с исходниками тега…');
+
+    late http.Response response;
+    try {
+      response = await _client
+          .get(
+            sourceUri,
+            headers: const {
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'Povarnya-Android-Updater',
+            },
+          )
+          .timeout(UpdateConfig.requestTimeout);
+    } on Object catch (error) {
+      throw UpdateFailure(
+        code: 'RELEASE_SOURCE_LOOKUP_FAILED',
+        title: 'Не удалось проверить исходники выпуска',
+        message: 'GitHub не вернул pubspec.yaml для метки $tag.',
+        suggestion: 'Проверьте сеть и целостность GitHub Release.',
+        technicalDetails: '$error\nGET $sourceUri',
+      );
+    }
+    if (response.statusCode != HttpStatus.ok) {
+      throw UpdateFailure(
+        code: 'RELEASE_SOURCE_HTTP_${response.statusCode}',
+        title: 'Не удалось проверить исходники выпуска',
+        message:
+            'GitHub вернул HTTP ${response.statusCode} '
+            'для pubspec.yaml метки $tag.',
+        suggestion: 'Проверьте, что тег указывает на полный исходный код.',
+        technicalDetails: 'GET $sourceUri\n${response.body}',
+      );
+    }
+
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, Object?> ||
+          decoded['encoding'] != 'base64' ||
+          decoded['content'] is! String) {
+        throw const FormatException('GitHub contents response is incomplete');
+      }
+      final encoded = (decoded['content']! as String).replaceAll('\n', '');
+      final pubspec = utf8.decode(base64.decode(encoded));
+      final match = RegExp(
+        r'^version:\s*(0\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2}))\s*$',
+        multiLine: true,
+      ).firstMatch(pubspec);
+      if (match == null) throw const FormatException('version is missing');
+      final name = match.group(1)!;
+      final parts = _parseVersion(name);
+      if (parts == null) throw const FormatException('version is invalid');
+      return (name: name, code: _androidVersionCode(parts));
+    } on Object catch (error) {
+      throw UpdateFailure(
+        code: 'RELEASE_SOURCE_VERSION_INVALID',
+        title: 'В исходниках выпуска нет версии',
+        message: 'pubspec.yaml метки $tag не содержит версию вида 0.7.8.',
+        suggestion: 'Исправьте pubspec.yaml и опубликуйте новый выпуск.',
+        technicalDetails: '$error\nGET $sourceUri',
+      );
+    }
   }
 
   Future<String> _installedVersion() async {
