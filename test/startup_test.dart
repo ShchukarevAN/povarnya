@@ -39,4 +39,23 @@ void main() {
     await tester.pump();
     expect(find.text('application-ready'), findsOneWidget);
   });
+
+  testWidgets('ошибка подготовки показывается внизу заставки', (tester) async {
+    await tester.pumpWidget(
+      PovarnyaStartupApp(
+        prepareApplication: (_) async => throw StateError('database failed'),
+        loadingBuilder: (_) => const ColoredBox(
+          key: ValueKey('startup'),
+          color: Color(0xFFDCD2CC),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('startup')), findsOneWidget);
+    expect(find.byKey(const ValueKey('startup-error')), findsOneWidget);
+    expect(find.textContaining('Ошибка запуска:'), findsOneWidget);
+    expect(find.textContaining('database failed'), findsOneWidget);
+  });
 }

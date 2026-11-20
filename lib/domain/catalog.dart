@@ -6672,7 +6672,7 @@ List<RecipeNode> _restoredAppleCottageCasseroleSteps() => [
     ]),
   ]),
   _node('zap-4-add', CatalogCards.add, [
-    _ingredient('zap-4-flour', CatalogCards.flour),
+    RecipeNode(id: 'zap-4-preparation', card: CatalogCards.preparation),
     _ingredient('zap-4-apples', CatalogCards.apples),
     _text('zap-4-text', 'в творожную массу'),
   ]),

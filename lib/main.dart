@@ -63,6 +63,7 @@ class _PovarnyaStartupAppState extends State<PovarnyaStartupApp> {
   bool _ready = false;
   bool _applicationPrepared = false;
   bool _startupVideoCompletedFirstCycle = false;
+  String? _startupError;
 
   @override
   void initState() {
@@ -74,40 +75,46 @@ class _PovarnyaStartupAppState extends State<PovarnyaStartupApp> {
   }
 
   Future<void> _prepareApplication() async {
-    final override = widget.prepareApplication;
-    if (override != null) {
-      await override(context);
-    } else {
-      await Future.wait([
-        AppSettings().load(),
-        PerformanceTrace.instance.startIfRequested(),
-        RecipeDatabase().open(),
-      ]);
-      await _restoreStartupWindowState();
-      // Прогреваем только наиболее часто открываемые рецепты. Все остальные
-      // загружаются при первом открытии, поэтому большой каталог не замедляет
-      // старт приложения.
-      final database = RecipeDatabase();
-      final frequentlyOpenedRecipeIds = await database.mostOpenedRecipeIds();
-      await database.preloadRecipeContent(frequentlyOpenedRecipeIds);
-      if (!mounted) return;
-      // Фотографии остальных рецептов не декодируются при запуске. Прогрев
-      // ограничен тем же коротким списком, что и сами часто открываемые блюда.
-      await Future.wait([
-        for (final recipeId in frequentlyOpenedRecipeIds)
-          database.loadRecipePhotoPath(recipeId).then((photoPath) async {
-            if (photoPath != null && mounted) {
-              await precacheImage(FileImage(File(photoPath)), context);
-            }
-          }),
-        for (final recipeId in frequentlyOpenedRecipeIds)
-          database.loadRecipePhotoBytes(recipeId).then((photoBytes) async {
-            if (photoBytes != null && mounted) {
-              await precacheImage(MemoryImage(photoBytes), context);
-            }
-          }),
-      ]);
-      await preloadRecipeInterfaceAssets(context);
+    try {
+      final override = widget.prepareApplication;
+      if (override != null) {
+        await override(context);
+      } else {
+        await Future.wait([
+          AppSettings().load(),
+          PerformanceTrace.instance.startIfRequested(),
+          RecipeDatabase().open(),
+        ]);
+        await _restoreStartupWindowState();
+        // Прогреваем только наиболее часто открываемые рецепты. Все остальные
+        // загружаются при первом открытии, поэтому большой каталог не замедляет
+        // старт приложения.
+        final database = RecipeDatabase();
+        final frequentlyOpenedRecipeIds = await database.mostOpenedRecipeIds();
+        await database.preloadRecipeContent(frequentlyOpenedRecipeIds);
+        if (!mounted) return;
+        // Фотографии остальных рецептов не декодируются при запуске. Прогрев
+        // ограничен тем же коротким списком, что и сами часто открываемые блюда.
+        await Future.wait([
+          for (final recipeId in frequentlyOpenedRecipeIds)
+            database.loadRecipePhotoPath(recipeId).then((photoPath) async {
+              if (photoPath != null && mounted) {
+                await precacheImage(FileImage(File(photoPath)), context);
+              }
+            }),
+          for (final recipeId in frequentlyOpenedRecipeIds)
+            database.loadRecipePhotoBytes(recipeId).then((photoBytes) async {
+              if (photoBytes != null && mounted) {
+                await precacheImage(MemoryImage(photoBytes), context);
+              }
+            }),
+        ]);
+        await preloadRecipeInterfaceAssets(context);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('STARTUP_ERROR: $error\n$stackTrace');
+      if (mounted) setState(() => _startupError = '$error');
+      return;
     }
     _applicationPrepared = true;
     _finishStartupWhenReady();
@@ -129,16 +136,51 @@ class _PovarnyaStartupAppState extends State<PovarnyaStartupApp> {
   }
 
   @override
-  Widget build(BuildContext context) => _ready
-      ? (widget.applicationBuilder?.call(context) ?? const PovarnyaApp())
-      : MaterialApp(
-          debugShowCheckedModeBanner: false,
-          home:
-              widget.loadingBuilder?.call(_markStartupVideoCycleCompleted) ??
-              PovarnyaLoadingVideo(
-                onFirstCycleCompleted: _markStartupVideoCycleCompleted,
-              ),
+  Widget build(BuildContext context) {
+    if (_ready) {
+      return widget.applicationBuilder?.call(context) ?? const PovarnyaApp();
+    }
+    final loading =
+        widget.loadingBuilder?.call(_markStartupVideoCycleCompleted) ??
+        PovarnyaLoadingVideo(
+          onFirstCycleCompleted: _markStartupVideoCycleCompleted,
         );
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Stack(
+        fit: StackFit.expand,
+        children: [
+          loading,
+          if (_startupError case final error?)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  key: const ValueKey('startup-error'),
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xE6FFFFFF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF9E3B32)),
+                  ),
+                  child: Text(
+                    'Ошибка запуска: $error',
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF781F18),
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class PovarnyaApp extends StatefulWidget {
