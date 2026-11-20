@@ -16,6 +16,7 @@ class SileroTtsService {
   static const _modelRoot = 'assets/modules/silero_tts_ru/onnx';
   static const _sampleRate = 48000;
   static const _speakerEugene = 3;
+  static const _speechRate = .85;
   static const _symbolToId = <String, int>{
     '_': 0,
     '~': 1,
@@ -156,10 +157,13 @@ class SileroTtsService {
     final pitch = Float32List.fromList(pitchRaw);
 
     final ones = Float32List.fromList(List<double>.filled(length, 1));
+    final durationRates = Float32List.fromList(
+      List<double>.filled(length, _speechRate),
+    );
     final acousticOutputs = _run(_acoustic!, <String, _TensorData>{
       'sequence': _TensorData(sequence, [1, length]),
       'speaker_ids': _TensorData(speaker, const [1]),
-      'durs_rate': _TensorData(ones, [1, length]),
+      'durs_rate': _TensorData(durationRates, [1, length]),
       'gt_durs': _TensorData(durations, durationShape),
       'gt_pitch': _TensorData(pitch, pitchShape),
       'pitch_coefs': _TensorData(ones, [1, length]),

@@ -6,7 +6,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # Public application versions use only 0.x.y. Build metadata and a fourth
 # component are forbidden; Android derives its private versionCode separately.
-version: 0.7.11
+version: 0.8.0
 
 environment:
   sdk: ^3.13.7
