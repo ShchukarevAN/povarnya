@@ -547,6 +547,8 @@ class _RecipeScreenState extends State<RecipeScreen>
   late bool _compactSandboxModules;
   late double _rightPanelFraction;
   late double _bottomPanelFraction;
+  double _notePanelReveal = 0;
+  bool _isNotePanelDragging = false;
   bool? _wasVerticalWorkspace;
   String? _savedContentFingerprint;
   String? _recipePhotoPath;
@@ -1005,6 +1007,26 @@ class _RecipeScreenState extends State<RecipeScreen>
     AppSettings().save();
   }
 
+  void _toggleNotePanel() => setState(() {
+    _notePanelReveal = _notePanelReveal >= .5 ? 0 : 1;
+  });
+
+  void _dragNotePanel(double verticalDelta, double panelHeight) {
+    if (panelHeight <= 0) return;
+    setState(() {
+      _isNotePanelDragging = true;
+      // Тяга вверх раскрывает нижнюю панель, тяга вниз прячет её.
+      _notePanelReveal = (_notePanelReveal - verticalDelta / panelHeight)
+          .clamp(0.0, 1.0)
+          .toDouble();
+    });
+  }
+
+  void _finishNotePanelDrag() {
+    if (!_isNotePanelDragging) return;
+    setState(() => _isNotePanelDragging = false);
+  }
+
   void _toggleCompactSandboxModules() {
     setState(() => _compactSandboxModules = !_compactSandboxModules);
     AppSettings().compactSandboxModules = _compactSandboxModules;
@@ -1317,6 +1339,7 @@ class _RecipeScreenState extends State<RecipeScreen>
             : KeyedSubtree(key: const ValueKey('notes'), child: notePanel),
       );
       const handleSize = 9.0;
+      const notePanelHandleSize = 48.0;
       const layoutDuration = Duration(milliseconds: 320);
       // Обычное изменение размера окна не должно задерживать перерасчёт
       // содержимого. Анимация нужна именно при переходе правой колонки вниз
@@ -1333,7 +1356,35 @@ class _RecipeScreenState extends State<RecipeScreen>
       late final Rect canvasRect;
       late final Rect panelRect;
       late final Rect handleRect;
-      if (isVertical) {
+      final slidingNotePanel = isVertical && !_editing;
+      if (slidingNotePanel) {
+        final minimumFraction = 180 / height;
+        final maximumFraction = 1 - 200 / height;
+        final expandedFraction = minimumFraction <= maximumFraction
+            ? _bottomPanelFraction
+                  .clamp(minimumFraction, maximumFraction)
+                  .toDouble()
+            : .5;
+        final expandedPanelHeight = height * expandedFraction;
+        final panelHeight = expandedPanelHeight * _notePanelReveal;
+        final canvasHeight = (height - panelHeight - notePanelHandleSize).clamp(
+          0.0,
+          height,
+        );
+        canvasRect = Rect.fromLTWH(0, 0, width, canvasHeight);
+        handleRect = Rect.fromLTWH(
+          0,
+          canvasHeight,
+          width,
+          notePanelHandleSize,
+        );
+        panelRect = Rect.fromLTWH(
+          0,
+          canvasHeight + notePanelHandleSize,
+          width,
+          panelHeight,
+        );
+      } else if (isVertical) {
         final minimumFraction = 180 / height;
         final maximumFraction = 1 - 200 / height;
         final visibleFraction = minimumFraction <= maximumFraction
@@ -1377,7 +1428,9 @@ class _RecipeScreenState extends State<RecipeScreen>
       return Stack(
         children: [
           AnimatedPositioned.fromRect(
-            duration: transitionDuration,
+            duration: _isNotePanelDragging
+                ? Duration.zero
+                : transitionDuration,
             curve: Curves.easeInOutCubic,
             rect: canvasRect,
             child: GestureDetector(
@@ -1407,12 +1460,23 @@ class _RecipeScreenState extends State<RecipeScreen>
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 160),
               child: isVertical
-                  ? _RowResizeHandle(
-                      key: const ValueKey('row-resize-handle'),
-                      onDragUpdate: (delta) =>
-                          _resizeBottomPanel(delta, constraints),
-                      onDragEnd: _saveBottomPanelFraction,
-                    )
+                  ? slidingNotePanel
+                      ? _NotePanelHandle(
+                          key: const ValueKey('note-panel-handle'),
+                          isOpen: _notePanelReveal > 0,
+                          onTap: _toggleNotePanel,
+                          onDragUpdate: (delta) => _dragNotePanel(
+                            delta,
+                            height * _bottomPanelFraction,
+                          ),
+                          onDragEnd: _finishNotePanelDrag,
+                        )
+                      : _RowResizeHandle(
+                          key: const ValueKey('row-resize-handle'),
+                          onDragUpdate: (delta) =>
+                              _resizeBottomPanel(delta, constraints),
+                          onDragEnd: _saveBottomPanelFraction,
+                        )
                   : _ColumnResizeHandle(
                       key: const ValueKey('column-resize-handle'),
                       onDragUpdate: (delta) =>
@@ -1424,6 +1488,43 @@ class _RecipeScreenState extends State<RecipeScreen>
         ],
       );
     },
+  );
+}
+
+/// Ручка нижней панели просмотра. Панель раскрывается ровно до места, где
+/// пользователь отпустил жест; автоматического доведения до края нет.
+class _NotePanelHandle extends StatelessWidget {
+  const _NotePanelHandle({
+    super.key,
+    required this.isOpen,
+    required this.onTap,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+  });
+
+  final bool isOpen;
+  final VoidCallback onTap;
+  final ValueChanged<double> onDragUpdate;
+  final VoidCallback onDragEnd;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.resizeRow,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (details) => onDragUpdate(details.delta.dy),
+      onVerticalDragEnd: (_) => onDragEnd(),
+      onVerticalDragCancel: onDragEnd,
+      child: Center(
+        child: IconButton(
+          tooltip: isOpen ? 'Скрыть примечания' : 'Показать примечания',
+          onPressed: onTap,
+          icon: Icon(
+            isOpen ? Icons.keyboard_arrow_down : Icons.notes_outlined,
+          ),
+        ),
+      ),
+    ),
   );
 }
 

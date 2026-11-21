@@ -6,9 +6,11 @@ plugins {
 
 fun androidVersionCode(version: String): Int {
     val component = "(0|[1-9]\\d{0,2})"
-    val match = Regex("^0\\.$component\\.$component$").matchEntire(version)
-        ?: error("Version must have the strict form 0.x.y: $version")
-    val code = match.groupValues[1].toInt() * 1000 + match.groupValues[2].toInt()
+    val match = Regex("^$component\\.$component\\.$component$").matchEntire(version)
+        ?: error("Version must have the strict form x.y.z: $version")
+    val code = match.groupValues[1].toInt() * 1_000_000 +
+        match.groupValues[2].toInt() * 1000 +
+        match.groupValues[3].toInt()
     require(code > 0) { "Version 0.0.0 is not valid for Android" }
     return code
 }
@@ -31,7 +33,7 @@ android {
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // versionCode is an internal Android field, not part of the public
-        // 0.x.y version. Keep this formula in sync with update_service.dart.
+        // x.y.z version. Keep this formula in sync with update_service.dart.
         versionCode = androidVersionCode(flutter.versionName)
         versionName = flutter.versionName
 

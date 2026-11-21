@@ -77,17 +77,18 @@ typedef _TaggedVersion = ({String name, int code});
 _VersionParts? _parseVersion(String value, {bool withVPrefix = false}) {
   final prefix = withVPrefix ? 'v' : '';
   const component = r'(0|[1-9]\d{0,2})';
-  final match = RegExp('^${prefix}0\\.$component\\.$component\$')
+  final match = RegExp('^$prefix$component\\.$component\\.$component\$')
       .firstMatch(value);
   if (match == null) return null;
-  final minor = int.parse(match.group(1)!);
-  final patch = int.parse(match.group(2)!);
-  if (minor == 0 && patch == 0) return null;
-  return (major: 0, minor: minor, patch: patch);
+  final major = int.parse(match.group(1)!);
+  final minor = int.parse(match.group(2)!);
+  final patch = int.parse(match.group(3)!);
+  if (major == 0 && minor == 0 && patch == 0) return null;
+  return (major: major, minor: minor, patch: patch);
 }
 
 int _androidVersionCode(_VersionParts version) =>
-    version.minor * 1000 + version.patch;
+    version.major * 1000000 + version.minor * 1000 + version.patch;
 
 int _compareVersions(String left, String right) {
   final leftParts = _parseVersion(left)!;
@@ -440,7 +441,7 @@ class UpdateService {
       final encoded = (decoded['content']! as String).replaceAll('\n', '');
       final pubspec = utf8.decode(base64.decode(encoded));
       final match = RegExp(
-        r'^version:\s*(0\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2}))\s*$',
+        r'^version:\s*((?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2}))\s*$',
         multiLine: true,
       ).firstMatch(pubspec);
       if (match == null) throw const FormatException('version is missing');
@@ -452,7 +453,7 @@ class UpdateService {
       throw UpdateFailure(
         code: 'RELEASE_SOURCE_VERSION_INVALID',
         title: 'В исходниках выпуска нет версии',
-        message: 'pubspec.yaml метки $tag не содержит версию вида 0.7.8.',
+        message: 'pubspec.yaml метки $tag не содержит версию вида x.y.z.',
         suggestion: 'Исправьте pubspec.yaml и опубликуйте новый выпуск.',
         technicalDetails: '$error\nGET $sourceUri',
       );
