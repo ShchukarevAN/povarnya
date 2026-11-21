@@ -10,7 +10,6 @@ import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'data/app_settings.dart';
 import 'domain/catalog.dart';
-import 'domain/recipe_node.dart';
 import 'data/recipe_database.dart';
 import 'performance_trace.dart';
 import 'presentation/recipe_screen.dart';
@@ -109,6 +108,7 @@ class _PovarnyaStartupAppState extends State<PovarnyaStartupApp> {
               }
             }),
         ]);
+        if (!mounted) return;
         await preloadRecipeInterfaceAssets(context);
       }
     } catch (error, stackTrace) {
@@ -346,8 +346,9 @@ class _PovarnyaAppState extends State<PovarnyaApp> {
     _touchPointers[event.pointer] = event.position;
     final originA = _pinchOriginA;
     final originB = _pinchOriginB;
-    if (_touchPointers.length != 2 || originA == null || originB == null)
+    if (_touchPointers.length != 2 || originA == null || originB == null) {
       return;
+    }
     final positions = _touchPointers.values.toList(growable: false);
     final originalDistance = (originA - originB).distance;
     final currentDistance = (positions[0] - positions[1]).distance;
@@ -754,9 +755,9 @@ class _RecipeOpenTransitionState extends State<_RecipeOpenTransition>
     final title = _measuredTargetRect(widget.titleTargetKey);
     final measuredIngredients = <String, Rect>{
       for (final ingredient in ingredients)
-        if (_measuredTargetRect(widget.ingredientTargetKeys[ingredient])
-            case final rect?)
-          ingredient: rect,
+        ingredient: ?_measuredTargetRect(
+          widget.ingredientTargetKeys[ingredient],
+        ),
     };
     final everyTargetExists =
         title != null && measuredIngredients.length == ingredients.length;
@@ -768,7 +769,7 @@ class _RecipeOpenTransitionState extends State<_RecipeOpenTransition>
       final sameAsPrevious =
           _candidateTitleTarget != null &&
           _candidateIngredientTargets != null &&
-          _sameRect(title!, _candidateTitleTarget!) &&
+          _sameRect(title, _candidateTitleTarget!) &&
           _sameTargets(measuredIngredients, _candidateIngredientTargets!);
       _candidateTitleTarget = title;
       _candidateIngredientTargets = measuredIngredients;

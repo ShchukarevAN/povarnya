@@ -34,5 +34,21 @@ void main() {
       find.ancestor(of: microphone, matching: find.byType(TextField)),
       findsOneWidget,
     );
+
+    final fasting = find.byKey(const ValueKey('recipe-fasting-toggle'));
+    expect(fasting, findsOneWidget);
+    expect(find.text('Все блюда'), findsOneWidget);
+
+    await tester.tap(fasting);
+    await tester.pump();
+    expect(find.text('Постные'), findsOneWidget);
+
+    await tester.tap(fasting);
+    await tester.pump();
+    expect(find.text('Непостные'), findsOneWidget);
+
+    await tester.tap(fasting);
+    await tester.pump();
+    expect(find.text('Все блюда'), findsOneWidget);
   });
 }

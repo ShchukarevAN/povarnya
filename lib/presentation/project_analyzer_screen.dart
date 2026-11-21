@@ -139,8 +139,10 @@ class ProjectAnalyzerService {
     await _auditAnalyzerScope(),
     await _auditProfilerIsolation(),
     await _auditSingleRecipeRenderer(),
+    await _auditWidgetConfigurationRedundancy(),
     await _auditRecipeNodePersistence(),
     await _auditExternalFlutterSdk(),
+    await _auditFlutterAnalyzeUnicodePaths(),
     await _auditSplashAnimationIsolation(),
   ];
 
@@ -427,6 +429,25 @@ class ProjectAnalyzerService {
     );
   }
 
+  Future<ProjectAudit> _auditWidgetConfigurationRedundancy() async {
+    final source = await File('$root/lib/presentation/recipe_screen.dart')
+        .readAsString();
+    final canvas = _block(source, 'class _RecipeCanvas');
+    final leftovers = <String>[
+      if (source.contains('expandLeft')) 'expandLeft',
+      if (source.contains('dragHandle')) 'dragHandle',
+      if (canvas?.contains('final bool compact;') ?? false)
+        '_RecipeCanvas.compact',
+    ];
+    return ProjectAudit(
+      title: 'Без ложной настраиваемости виджетов',
+      passed: leftovers.isEmpty,
+      details: leftovers.isEmpty
+          ? 'Карточки и холст не хранят параметры с единственным постоянным значением.'
+          : 'Вернулись неиспользуемые параметры: ${leftovers.join(', ')}.',
+    );
+  }
+
   Future<ProjectAudit> _auditRecipeNodePersistence() async {
     final source = await File('$root/lib/data/recipe_database.dart')
         .readAsString();
@@ -465,6 +486,34 @@ class ProjectAnalyzerService {
       details: passed
           ? 'SDK находится в «Среды разработки», а единая конфигурация допускает переопределение пути.'
           : 'Flutter SDK отсутствует по внешнему пути, остался внутри проекта или не задан в общей конфигурации.',
+    );
+  }
+
+  Future<ProjectAudit> _auditFlutterAnalyzeUnicodePaths() async {
+    const sdkPath = '/home/smirnovom/Среды разработки/flutter';
+    final transportFile = File(
+      '$sdkPath/packages/flutter_tools/lib/src/dart/analysis.dart',
+    );
+    final regressionTestFile = File(
+      '$sdkPath/packages/flutter_tools/test/commands.shard/hermetic/'
+      'analyze_test.dart',
+    );
+    final transportSource = await transportFile.exists()
+        ? await transportFile.readAsString()
+        : '';
+    final regressionTestSource = await regressionTestFile.exists()
+        ? await regressionTestFile.readAsString()
+        : '';
+    final passed =
+        transportSource.contains('utf8.encode(message).length') &&
+        !transportSource.contains(r'Content-Length: ${message.length}') &&
+        regressionTestSource.contains('/Флаттер/料理');
+    return ProjectAudit(
+      title: 'flutter analyze поддерживает Unicode-пути',
+      passed: passed,
+      details: passed
+          ? 'LSP Content-Length считается в UTF-8 байтах; есть тест с кириллицей и иероглифами.'
+          : 'Flutter SDK снова считает UTF-16 символы или потерял Unicode-регрессионный тест.',
     );
   }
 
@@ -589,8 +638,9 @@ class ProjectAnalyzerService {
   Future<(List<ModuleStatistic>, List<RecipeStructure>, int)>
   _scanDatabase() async {
     final file = File('$root/database/recipes.db');
-    if (!await file.exists())
+    if (!await file.exists()) {
       return (<ModuleStatistic>[], <RecipeStructure>[], 0);
+    }
     sqfliteFfiInit();
     final factory = databaseFactoryFfi;
     final database = await factory.openDatabase(
@@ -726,10 +776,12 @@ class _ProjectAnalyzerScreenState extends State<ProjectAnalyzerScreen> {
         body: FutureBuilder<ProjectSnapshot>(
           future: _snapshot,
           builder: (context, snapshot) {
-            if (snapshot.hasError)
+            if (snapshot.hasError) {
               return Center(child: Text('Ошибка анализа: ${snapshot.error}'));
-            if (!snapshot.hasData)
+            }
+            if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
+            }
             final data = snapshot.data!;
             return TabBarView(
               children: [
@@ -950,13 +1002,14 @@ class _HighlightedCode extends StatelessWidget {
     final spans = <InlineSpan>[];
     var cursor = 0;
     for (final match in token.allMatches(source)) {
-      if (match.start > cursor)
+      if (match.start > cursor) {
         spans.add(TextSpan(text: source.substring(cursor, match.start)));
+      }
       final text = match.group(0)!;
       final variable = lookup[text];
       final color = text.startsWith('//')
           ? semantic.success
-          : (text.startsWith('\"') || text.startsWith("'"))
+          : (text.startsWith('"') || text.startsWith("'"))
           ? semantic.warning
           : RegExp(
               r'^(class|return|final|var|const|if|else|for|while|async|await|void|int|double|bool|String)$',
@@ -985,8 +1038,9 @@ class _HighlightedCode extends StatelessWidget {
       );
       cursor = match.end;
     }
-    if (cursor < source.length)
+    if (cursor < source.length) {
       spans.add(TextSpan(text: source.substring(cursor)));
+    }
     return SelectableText.rich(
       TextSpan(
         style: const TextStyle(fontFamily: 'monospace', fontSize: 13),

@@ -127,7 +127,7 @@ class SpeechDiagnostics {
           'time': DateTime.now().toIso8601String(),
           'code': failure.stage.code,
           'summary': failure.stage.summary,
-          if (failure.technicalDetails case final details?) 'details': details,
+          'details': ?failure.technicalDetails,
           if (failure.cause case final cause?) 'cause': cause.toString(),
           if (stackTrace != null) 'stack': stackTrace.toString(),
           ...context,

@@ -5,7 +5,7 @@ import 'recipe_node.dart';
 /// Изменяется только при изменении данных каталога. По ней локальная БД
 /// понимает, что нужно один раз синхронизировать встроенные записи, вместо
 /// полного удаления и создания каталога при каждом запуске приложения.
-const catalogRevision = 'catalog-v14';
+const catalogRevision = 'catalog-v15';
 
 /// Раздел блюда в каталоге. Значение [storageKey] хранится в локальной БД,
 /// а [title] показывается в поиске и выборе на экране рецепта.
@@ -118,6 +118,9 @@ const _catalogRecipeCategories = <String, RecipeCategory>{
   'lean-kulebyaka-cabbage-mushrooms': RecipeCategory.pastry,
   'lean-levashniki-apple': RecipeCategory.pastry,
   'fried-mushrooms-sour-cream': RecipeCategory.sideDish,
+  'firefighter-cutlets': RecipeCategory.main,
+  'baked-pumpkin': RecipeCategory.sideDish,
+  'baked-chicken': RecipeCategory.main,
 };
 
 enum IngredientGroup {
@@ -293,6 +296,7 @@ class CatalogRecipe {
 /// непостным. Масло растительное намеренно не входит в список: это обычный
 /// постный вариант, хотя в строгие дни его могут исключать отдельно.
 const _nonLeanIngredientLabels = <String>{
+  'Курица',
   'Куриное филе',
   'Свинина',
   'Говядина',
@@ -412,6 +416,7 @@ class CatalogCards {
       'ingredient.cucumber',
       'ingredient.sorrel',
       'ingredient.radishes',
+      'ingredient.pumpkin',
     },
     IngredientGroup.grains: {
       'ingredient.buckwheat',
@@ -441,6 +446,7 @@ class CatalogCards {
     IngredientGroup.animals: {
       // Мясо, рыба, яйца и фарш — единая продуктовая подгруппа.
       'ingredient.chicken-fillet',
+      'ingredient.chicken',
       'ingredient.pork',
       'ingredient.beef',
       'ingredient.ham',
@@ -734,6 +740,17 @@ class CatalogCards {
     kind: CardKind.action,
     nominative: 'Продолжать',
   );
+  static const marinate = CardDefinition(
+    id: 'action.marinate',
+    kind: CardKind.action,
+    nominative: 'Мариновать',
+  );
+  static const chicken = CardDefinition(
+    id: 'ingredient.chicken',
+    kind: CardKind.ingredient,
+    nominative: 'Курица',
+    forms: {GrammarCase.accusative: 'курицу'},
+  );
   static const chickenFillet = CardDefinition(
     id: 'ingredient.chicken-fillet',
     kind: CardKind.ingredient,
@@ -994,6 +1011,12 @@ class CatalogCards {
     kind: CardKind.ingredient,
     nominative: 'Кабачки',
     forms: {GrammarCase.accusative: 'кабачки'},
+  );
+  static const pumpkin = CardDefinition(
+    id: 'ingredient.pumpkin',
+    kind: CardKind.ingredient,
+    nominative: 'Тыква',
+    forms: {GrammarCase.accusative: 'тыкву'},
   );
   static const beet = CardDefinition(
     id: 'ingredient.beet',
@@ -1664,6 +1687,8 @@ class CatalogCards {
     pinch,
     wrap,
     continueCooking,
+    marinate,
+    chicken,
     chickenFillet,
     pearlBarley,
     pickledCucumbers,
@@ -1712,6 +1737,7 @@ class CatalogCards {
     ovenTopBottomHeat,
     multicookerProgram,
     zucchini,
+    pumpkin,
     sourCream,
     plums,
     sugar,
@@ -3492,8 +3518,9 @@ RecipeNode _moduleStep(
       ),
     );
   }
-  if (minutes != null)
+  if (minutes != null) {
     children.add(_time('$recipeId-$order-time', minutes, upperMinutes));
+  }
   return _node('$recipeId-$order', action, children);
 }
 
@@ -4631,6 +4658,123 @@ final _newClassicRecipes = <CatalogRecipe>[
       _moduleStep('fried-mushrooms-sour-cream', 7, CatalogCards.add, [
         (card: CatalogCards.dill, grams: 10),
       ]),
+    ],
+  ),
+  CatalogRecipe(
+    id: 'firefighter-cutlets',
+    title: 'Пожарские котлеты',
+    servings: 4,
+    detailedSteps: [
+      'Смешать 150 г хлеба и 120 мл молока; оставить хлеб в молоке на 5 минут.',
+      'Смешать 600 г фарша, хлеб, 50 г сливочного масла, 8 г соли и 1 г чёрного перца.',
+      'Сформировать котлеты из фарша и обвалять их в 100 г панировочных сухарей.',
+      'Жарить котлеты на 30 мл растительного масла и 30 г сливочного масла по 4–5 минут с каждой стороны.',
+    ],
+    buildSteps: () => [
+      _moduleStep('firefighter-cutlets', 1, CatalogCards.mix, [
+        (card: CatalogCards.bread, grams: 150),
+        (card: CatalogCards.milk, milliliters: 120),
+      ], minutes: 5),
+      _moduleStep('firefighter-cutlets', 2, CatalogCards.mix, [
+        (card: CatalogCards.mincedMeat, grams: 600),
+        (card: CatalogCards.bread, grams: 150),
+        (card: CatalogCards.butter, grams: 50),
+        (card: CatalogCards.salt, grams: 8),
+        (card: CatalogCards.blackPepper, grams: 1),
+      ]),
+      _moduleStep('firefighter-cutlets', 3, CatalogCards.form, [
+        (card: CatalogCards.mincedMeat, grams: 600),
+      ]),
+      _moduleStep('firefighter-cutlets', 4, CatalogCards.coat, [
+        (card: CatalogCards.breadcrumbs, grams: 100),
+      ]),
+      _moduleStep(
+        'firefighter-cutlets',
+        5,
+        CatalogCards.fry,
+        [
+          (card: CatalogCards.mincedMeat, grams: 600),
+          (card: CatalogCards.vegetableOil, milliliters: 30),
+          (card: CatalogCards.butter, grams: 30),
+        ],
+        minutes: 4,
+        upperMinutes: 5,
+      ),
+    ],
+  ),
+  CatalogRecipe(
+    id: 'baked-pumpkin',
+    title: 'Тыква запечённая',
+    servings: 4,
+    buildSteps: () => [
+      _moduleStep('baked-pumpkin', 1, CatalogCards.clean, [
+        (card: CatalogCards.pumpkin, grams: 800),
+      ]),
+      _moduleStep('baked-pumpkin', 2, CatalogCards.cut, [
+        (card: CatalogCards.pumpkin, grams: 800),
+      ]),
+      _moduleStep('baked-pumpkin', 3, CatalogCards.mix, [
+        (card: CatalogCards.pumpkin, grams: 800),
+        (card: CatalogCards.vegetableOil, milliliters: 30),
+        (card: CatalogCards.salt, grams: 5),
+        (card: CatalogCards.honey, grams: 30),
+        (card: CatalogCards.cinnamon, grams: 1),
+      ]),
+      _moduleStep(
+        'baked-pumpkin',
+        4,
+        CatalogCards.preheat,
+        [(card: CatalogCards.oven)],
+        temperature: 200,
+      ),
+      _moduleStep(
+        'baked-pumpkin',
+        5,
+        CatalogCards.bake,
+        [(card: CatalogCards.pumpkin, grams: 800)],
+        temperature: 200,
+        minutes: 30,
+        upperMinutes: 40,
+      ),
+    ],
+  ),
+  CatalogRecipe(
+    id: 'baked-chicken',
+    title: 'Курица запечённая',
+    servings: 4,
+    detailedSteps: [
+      'Смешать 30 мл растительного масла, 15 г чеснока, 30 г горчицы, 5 г сладкой паприки, 10 г соли и 2 г чёрного перца.',
+      'Мариновать 1 кг курицы в полученной смеси 30–60 минут.',
+      'Разогреть духовку до 200 °C и запекать курицу 45–60 минут.',
+    ],
+    buildSteps: () => [
+      _moduleStep('baked-chicken', 1, CatalogCards.mix, [
+        (card: CatalogCards.vegetableOil, milliliters: 30),
+        (card: CatalogCards.garlic, grams: 15),
+        (card: CatalogCards.mustard, grams: 30),
+        (card: CatalogCards.sweetPaprika, grams: 5),
+        (card: CatalogCards.salt, grams: 10),
+        (card: CatalogCards.blackPepper, grams: 2),
+      ]),
+      _moduleStep('baked-chicken', 2, CatalogCards.marinate, [
+        (card: CatalogCards.chicken, grams: 1000),
+      ], minutes: 30, upperMinutes: 60),
+      _moduleStep(
+        'baked-chicken',
+        3,
+        CatalogCards.preheat,
+        [(card: CatalogCards.oven)],
+        temperature: 200,
+      ),
+      _moduleStep(
+        'baked-chicken',
+        4,
+        CatalogCards.bake,
+        [(card: CatalogCards.chicken, grams: 1000)],
+        temperature: 200,
+        minutes: 45,
+        upperMinutes: 60,
+      ),
     ],
   ),
 ];

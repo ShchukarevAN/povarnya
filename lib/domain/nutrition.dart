@@ -206,10 +206,14 @@ class NutritionCatalog {
           );
         }
       }
-      for (final child in node.children) collect(child);
+      for (final child in node.children) {
+        collect(child);
+      }
     }
 
-    for (final step in steps) collect(step);
+    for (final step in steps) {
+      collect(step);
+    }
     var total = const NutritionTotals.zero();
     for (final entry in {...maximumAmounts, ...summedAmounts}.entries) {
       final profile = profiles[entry.key]!;

@@ -2,10 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderBox;
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image/image.dart' as image;
@@ -389,18 +387,21 @@ bool canAddChild(
             item.card.id == 'quantity.volume' ||
             item.card.id == 'quantity.count' ||
             item.card.id == 'quantity.spoon',
-      ))
+      )) {
     return false;
+  }
   if (child.id == 'quantity.fat-content' &&
       existing.any((item) => item.card.id == 'quantity.fat-content')) {
     return false;
   }
   if (child.id == 'quantity.time' &&
-      existing.any((item) => item.card.id == 'quantity.time'))
+      existing.any((item) => item.card.id == 'quantity.time')) {
     return false;
+  }
   if (child.id == 'quantity.temperature' &&
-      existing.any((item) => item.card.id == 'quantity.temperature'))
+      existing.any((item) => item.card.id == 'quantity.temperature')) {
     return false;
+  }
   return _hasAllowedChildKind(parent, child) &&
       !existing.any((item) => item.card.id == child.id);
 }
@@ -533,6 +534,8 @@ class _RecipeScreenState extends State<RecipeScreen>
   late bool _modeTransitionFromEditing = _editing;
   bool _isModeDragging = false;
   bool _modeDragDirectionAccepted = false;
+  double _modeDragDistanceX = 0;
+  double _modeDragDistanceY = 0;
   bool _revertModeAfterDrag = false;
   bool _closingFromEscape = false;
   bool _backSwipeActive = false;
@@ -739,10 +742,14 @@ class _RecipeScreenState extends State<RecipeScreen>
   void _updateRecipeDishLabels() {
     void visit(RecipeNode node) {
       if (node.card.id == 'text.recipe-dish') node.text = _title;
-      for (final child in node.children) visit(child);
+      for (final child in node.children) {
+        visit(child);
+      }
     }
 
-    for (final step in _steps) visit(step);
+    for (final step in _steps) {
+      visit(step);
+    }
   }
 
   Map<String, Object?> _snapshotNode(RecipeNode node) => {
@@ -794,14 +801,25 @@ class _RecipeScreenState extends State<RecipeScreen>
 
   void _startWorkspaceDrag() => _startModeDrag();
 
-  void _dragWorkspace(double horizontalDelta, double width) {
+  void _dragWorkspace(
+    double horizontalDelta,
+    double verticalDelta,
+    double width,
+  ) {
+    _modeDragDistanceX += horizontalDelta;
+    _modeDragDistanceY += verticalDelta;
+    final horizontalDistance = _modeDragDistanceX.abs();
+    final verticalDistance = _modeDragDistanceY.abs();
+    final horizontalDirectionAccepted = horizontalDistance >= 14.0 &&
+        horizontalDistance >= verticalDistance * 1.5;
     // Пока жест был начат в редакторе, [_editing] уже мог переключиться в
     // false, хотя палец всё ещё завершает переход «редактор → просмотр».
     // В этом случае вправо продолжает означать просмотр, а не выход к поиску.
     final startedFromViewer = !_modeTransitionFromEditing;
     if (!_editing &&
         startedFromViewer &&
-        (_backSwipeActive || horizontalDelta > 0)) {
+        (_backSwipeActive ||
+            (horizontalDirectionAccepted && horizontalDelta > 0))) {
       if (!_backSwipeActive) {
         setState(() {
           _backSwipeActive = true;
@@ -816,7 +834,7 @@ class _RecipeScreenState extends State<RecipeScreen>
           );
       return;
     }
-    _dragMode(horizontalDelta, width);
+    _dragMode(horizontalDelta, verticalDelta, width);
   }
 
   void _finishWorkspaceDrag() {
@@ -1042,6 +1060,8 @@ class _RecipeScreenState extends State<RecipeScreen>
     setState(() {
       _isModeDragging = true;
       _modeDragDirectionAccepted = false;
+      _modeDragDistanceX = 0;
+      _modeDragDistanceY = 0;
       _revertModeAfterDrag = false;
       _modeTransition.stop();
       _modeTransitionFromEditing = _editing;
@@ -1049,8 +1069,23 @@ class _RecipeScreenState extends State<RecipeScreen>
     });
   }
 
-  void _dragMode(double horizontalDelta, double width) {
+  void _dragMode(double horizontalDelta, double verticalDelta, double width) {
     if (!_isModeDragging || width <= 0) return;
+    // Не считаем диагональное/вертикальное движение переходом между
+    // просмотром и редактором. Сначала должна набраться заметная дистанция,
+    // а горизонтальная составляющая должна уверенно преобладать над
+    // вертикальной. Это особенно важно для мыши: небольшой снос курсора в
+    // сторону часто сопровождает обычное перетаскивание вниз.
+    if (!_modeDragDirectionAccepted) {
+      const directionSlop = 14.0;
+      const horizontalDominance = 1.5;
+      final horizontalDistance = _modeDragDistanceX.abs();
+      final verticalDistance = _modeDragDistanceY.abs();
+      if (horizontalDistance < directionSlop ||
+          horizontalDistance < verticalDistance * horizontalDominance) {
+        return;
+      }
+    }
     // Из просмотра редактор открывается влево; из редактора просмотр
     // возвращается вправо. Движение в неверную сторону не запускает переход.
     final directedDelta = _modeTransitionFromEditing
@@ -1180,6 +1215,25 @@ class _RecipeScreenState extends State<RecipeScreen>
         compactVertical: isVertical,
         onToggleCompactModules: _toggleCompactSandboxModules,
       );
+      final overview = _RecipeOverview(
+        servingsController: _servingsController,
+        servingsFocusNode: _servingsFocusNode,
+        onServingsEditingComplete: _restoreServingsIfInvalid,
+        servings: _servings,
+        nutrition: NutritionCatalog.perServing(
+          _steps,
+          recipeMultiplier: _recipeMultiplier,
+        ),
+        onServingsChanged: (value) => setState(() {
+          _servings = value;
+        }),
+        recipePhotoPath: _recipePhotoPath,
+        recipePhotoBytes: _recipePhotoBytes,
+        savingRecipePhoto: _savingRecipePhoto,
+        onPickRecipePhoto: _selectRecipePhoto,
+        revealRecipePhoto:
+            widget.revealRecipePhoto && _revealPhotoAfterModeTransition,
+      );
       final canvas = _RecipeCanvas(
         key: _recipeCanvasKey,
         title: _title,
@@ -1213,6 +1267,7 @@ class _RecipeScreenState extends State<RecipeScreen>
         entranceTitleAnchor: widget.entranceTitleAnchor,
         entranceIngredientAnchors: widget.entranceIngredientAnchors,
         compactVertical: isVertical,
+        leadingOverview: isVertical && !_editing ? overview : null,
       );
       final center = canvas;
       final notePanel = _RecipeNotes(
@@ -1236,6 +1291,7 @@ class _RecipeScreenState extends State<RecipeScreen>
         onPickRecipePhoto: _selectRecipePhoto,
         revealRecipePhoto:
             widget.revealRecipePhoto && _revealPhotoAfterModeTransition,
+        showOverview: !isVertical,
       );
       final sidePanel = AnimatedSwitcher(
         // Песочница и примечания меняются синхронно с центральным шагом.
@@ -1327,11 +1383,14 @@ class _RecipeScreenState extends State<RecipeScreen>
             child: GestureDetector(
               key: const ValueKey('recipe-mode-swipe-surface'),
               behavior: HitTestBehavior.translucent,
-              onHorizontalDragStart: (_) => _startWorkspaceDrag(),
-              onHorizontalDragUpdate: (details) =>
-                  _dragWorkspace(details.delta.dx, canvasRect.width),
-              onHorizontalDragEnd: (_) => _finishWorkspaceDrag(),
-              onHorizontalDragCancel: _finishWorkspaceDrag,
+              onPanStart: (_) => _startWorkspaceDrag(),
+              onPanUpdate: (details) => _dragWorkspace(
+                details.delta.dx,
+                details.delta.dy,
+                canvasRect.width,
+              ),
+              onPanEnd: (_) => _finishWorkspaceDrag(),
+              onPanCancel: _finishWorkspaceDrag,
               child: center,
             ),
           ),
@@ -1433,6 +1492,144 @@ class _RowResizeHandle extends StatelessWidget {
   );
 }
 
+/// Верхний информационный блок просмотра рецепта: фотография, порции и КБЖУ.
+/// В вертикальной раскладке он находится в центральной области перед шагами,
+/// а в широкой — остаётся частью панели примечаний.
+class _RecipeOverview extends StatelessWidget {
+  const _RecipeOverview({
+    required this.servingsController,
+    required this.servingsFocusNode,
+    required this.onServingsEditingComplete,
+    required this.servings,
+    required this.nutrition,
+    required this.onServingsChanged,
+    required this.recipePhotoPath,
+    required this.recipePhotoBytes,
+    required this.savingRecipePhoto,
+    required this.onPickRecipePhoto,
+    required this.revealRecipePhoto,
+  });
+
+  final TextEditingController servingsController;
+  final FocusNode servingsFocusNode;
+  final VoidCallback onServingsEditingComplete;
+  final int servings;
+  final NutritionTotals nutrition;
+  final ValueChanged<int> onServingsChanged;
+  final String? recipePhotoPath;
+  final Uint8List? recipePhotoBytes;
+  final bool savingRecipePhoto;
+  final VoidCallback onPickRecipePhoto;
+  final bool revealRecipePhoto;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final portrait =
+          MediaQuery.sizeOf(context).height > MediaQuery.sizeOf(context).width;
+      final useHeaderRow = portrait && constraints.maxWidth >= 460;
+      final photo = _RecipePhotoPanel(
+        path: recipePhotoPath,
+        bytes: recipePhotoBytes,
+        saving: savingRecipePhoto,
+        onPick: onPickRecipePhoto,
+        reveal: revealRecipePhoto,
+      );
+      return useHeaderRow
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: (constraints.maxWidth * .36).clamp(132.0, 210.0),
+                  child: photo,
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: _servingsAndNutrition(context)),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                photo,
+                const SizedBox(height: 12),
+                _servingsAndNutrition(context),
+              ],
+            );
+    },
+  );
+
+  Widget _servingsAndNutrition(BuildContext context) => SizedBox(
+    width: double.infinity,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final field = _servingsField();
+        final nutritionSummary = _nutritionSummary(context);
+        final narrow = constraints.maxWidth < 320;
+        final layout = narrow
+            ? Column(
+                key: const ValueKey('servings-nutrition-narrow'),
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [field, const SizedBox(height: 10), nutritionSummary],
+              )
+            : Row(
+                key: const ValueKey('servings-nutrition-wide'),
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [field, const SizedBox(width: 16), nutritionSummary],
+              );
+        return Align(
+          alignment: Alignment.center,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SizeTransition(
+                sizeFactor: animation,
+                alignment: AlignmentDirectional.topStart,
+                child: child,
+              ),
+            ),
+            child: layout,
+          ),
+        );
+      },
+    ),
+  );
+
+  Widget _servingsField() => SizedBox(
+    width: 118,
+    height: 42,
+    child: TextField(
+      key: const ValueKey('recipe-servings-field'),
+      controller: servingsController,
+      focusNode: servingsFocusNode,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      decoration: InputDecoration(
+        isDense: true,
+        suffixText: servingsWord(servings),
+      ),
+      onChanged: (text) {
+        final value = int.tryParse(text);
+        if (value != null && value >= 1 && value <= 256) {
+          onServingsChanged(value);
+        }
+      },
+      onTapOutside: (_) => onServingsEditingComplete(),
+    ),
+  );
+
+  Widget _nutritionSummary(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('На порцию:', style: Theme.of(context).textTheme.titleSmall),
+      _NutritionSummary(nutrition: nutrition),
+    ],
+  );
+}
+
 class _RecipeNotes extends StatelessWidget {
   const _RecipeNotes({
     required this.controller,
@@ -1449,6 +1646,7 @@ class _RecipeNotes extends StatelessWidget {
     required this.savingRecipePhoto,
     required this.onPickRecipePhoto,
     required this.revealRecipePhoto,
+    required this.showOverview,
   });
   final TextEditingController controller;
   final TextEditingController servingsController;
@@ -1464,6 +1662,7 @@ class _RecipeNotes extends StatelessWidget {
   final bool savingRecipePhoto;
   final VoidCallback onPickRecipePhoto;
   final bool revealRecipePhoto;
+  final bool showOverview;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -1506,8 +1705,10 @@ class _RecipeNotes extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            header,
-            const SizedBox(height: 8),
+            if (showOverview) ...[
+              header,
+              const SizedBox(height: 8),
+            ],
             Text('Примечания', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 4),
             AnimatedSize(
@@ -1712,7 +1913,7 @@ class _RecipePhotoPanelState extends State<_RecipePhotoPanel>
         setState(() => _imageReady = true);
         _queueRevealIfReady();
       },
-      onError: (_, __) {
+      onError: (_, _) {
         // Нераскодированное изображение не имитируем анимацией: крышка
         // остаётся закрытой, а пользователь может выбрать другой файл.
       },
@@ -1936,26 +2137,26 @@ class _SquarePhotoCropDialogState extends State<_SquarePhotoCropDialog> {
   );
   late final double _minimumSide = (_source == null
       ? 1
-      : (_source!.width < _source!.height ? _source!.width : _source!.height) *
+      : (_source.width < _source.height ? _source.width : _source.height) *
             0.2);
   late double _side = _source == null
       ? 1
-      : (_source!.width < _source!.height ? _source!.width : _source!.height)
+      : (_source.width < _source.height ? _source.width : _source.height)
             .toDouble();
   double _left = 0;
   double _top = 0;
 
   void _keepCropInsideSource() {
     if (_source == null) return;
-    _left = _left.clamp(0, _source!.width - _side).toDouble();
-    _top = _top.clamp(0, _source!.height - _side).toDouble();
+    _left = _left.clamp(0, _source.width - _side).toDouble();
+    _top = _top.clamp(0, _source.height - _side).toDouble();
   }
 
   Rect _normalizedCrop() => Rect.fromLTRB(
     _left / _source!.width,
-    _top / _source!.height,
-    (_left + _side) / _source!.width,
-    (_top + _side) / _source!.height,
+    _top / _source.height,
+    (_left + _side) / _source.width,
+    (_top + _side) / _source.height,
   );
 
   @override
@@ -1971,7 +2172,7 @@ class _SquarePhotoCropDialogState extends State<_SquarePhotoCropDialog> {
         ],
       );
     }
-    final source = _source!;
+    final source = _source;
     final maxSide =
         (source.width < source.height ? source.width : source.height)
             .toDouble();
@@ -2367,7 +2568,6 @@ class _SandboxModuleDraggable extends StatelessWidget {
     required this.card,
     this.compact = false,
     this.forceShowLabel = false,
-    this.expandLeft = false,
     this.onHoverChanged,
     this.moduleKey,
   });
@@ -2375,7 +2575,6 @@ class _SandboxModuleDraggable extends StatelessWidget {
   final CardDefinition card;
   final bool compact;
   final bool forceShowLabel;
-  final bool expandLeft;
   final void Function(bool active, Offset position)? onHoverChanged;
   final GlobalKey? moduleKey;
 
@@ -2395,7 +2594,6 @@ class _SandboxModuleDraggable extends StatelessWidget {
       card: card,
       compact: compact,
       forceShowLabel: forceShowLabel,
-      expandLeft: expandLeft,
       onHoverChanged: onHoverChanged,
     ),
   );
@@ -2623,17 +2821,13 @@ class _ModuleCard extends StatefulWidget {
   const _ModuleCard({
     super.key,
     required this.card,
-    this.dragHandle = true,
     this.compact = false,
     this.forceShowLabel = false,
-    this.expandLeft = false,
     this.onHoverChanged,
   });
   final CardDefinition card;
-  final bool dragHandle;
   final bool compact;
   final bool forceShowLabel;
-  final bool expandLeft;
   final void Function(bool active, Offset position)? onHoverChanged;
 
   @override
@@ -2688,27 +2882,12 @@ class _ModuleCardState extends State<_ModuleCard> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (_showLabel && widget.expandLeft)
-                    _ModuleCardLabel(
-                      show: _showLabel,
-                      dragHandle: widget.dragHandle,
-                      label: widget.card.nominative,
-                      foreground: foreground,
-                    ),
-                  if (widget.dragHandle)
-                    moduleIcon(
-                      context,
-                      widget.card,
-                      size: 18,
-                      color: foreground,
-                    ),
-                  if (!widget.expandLeft || !_showLabel)
-                    _ModuleCardLabel(
-                      show: _showLabel,
-                      dragHandle: widget.dragHandle,
-                      label: widget.card.nominative,
-                      foreground: foreground,
-                    ),
+                  moduleIcon(context, widget.card, size: 18, color: foreground),
+                  _ModuleCardLabel(
+                    show: _showLabel,
+                    label: widget.card.nominative,
+                    foreground: foreground,
+                  ),
                 ],
               ),
             ),
@@ -2722,13 +2901,11 @@ class _ModuleCardState extends State<_ModuleCard> {
 class _ModuleCardLabel extends StatelessWidget {
   const _ModuleCardLabel({
     required this.show,
-    required this.dragHandle,
     required this.label,
     required this.foreground,
   });
 
   final bool show;
-  final bool dragHandle;
   final String label;
   final Color foreground;
 
@@ -2750,12 +2927,11 @@ class _ModuleCardLabel extends StatelessWidget {
             key: const ValueKey('label'),
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (dragHandle)
-                SizedBox(
-                  width: MediaQuery.sizeOf(context).width < 1000
-                      ? _sandboxCompactLabelGap
-                      : _sandboxRegularLabelGap,
-                ),
+              SizedBox(
+                width: MediaQuery.sizeOf(context).width < 1000
+                    ? _sandboxCompactLabelGap
+                    : _sandboxRegularLabelGap,
+              ),
               Text(label, style: TextStyle(color: foreground)),
             ],
           )
@@ -2787,8 +2963,8 @@ class _RecipeCanvas extends StatefulWidget {
     required this.onFastingChanged,
     required this.canDrop,
     required this.onDrop,
-    this.compact = false,
     required this.compactVertical,
+    this.leadingOverview,
     required this.onModuleDragChanged,
     required this.hideTitle,
     this.entranceTitleAnchor,
@@ -2819,8 +2995,8 @@ class _RecipeCanvas extends StatefulWidget {
   final bool Function(Object, RecipeNode?) canDrop;
   final void Function(Object, List<RecipeNode>, int, {RecipeNode? parent})
   onDrop;
-  final bool compact;
   final bool compactVertical;
+  final Widget? leadingOverview;
   final ValueChanged<bool> onModuleDragChanged;
   final bool hideTitle;
   final GlobalKey? entranceTitleAnchor;
@@ -2983,6 +3159,10 @@ class _RecipeCanvasState extends State<_RecipeCanvas> {
             ],
           ),
           SizedBox(height: widget.compactVertical ? 5 : 18),
+        ],
+        if (widget.leadingOverview != null) ...[
+          widget.leadingOverview!,
+          const SizedBox(height: 12),
         ],
         ...widget.steps.indexed.expand(
           (entry) => [
@@ -3236,16 +3416,11 @@ Future<void> showRecipeReferenceDialog(BuildContext context) =>
         title: const Text('Кухонная справка'),
         content: const SingleChildScrollView(
           child: SelectableText(
-            'Яйца\n'
-            '1 яйцо С1 примерно равно 1¼ яйца С2. В рецепте удобно считать: '
-            '4 яйца С2 ≈ 3 яйца С1.\n\n'
-            'Ложки без горки\n'
-            'Чайная — 5 мл, десертная — 10 мл, столовая — 15 мл.\n\n'
-            'Ориентировочные массы\n'
-            'Мука: без горки 3 / 6 / 9 г; с горкой 5 / 10 / 15 г.\n'
-            'Сахар: без горки 4 / 8 / 12 г; с горкой 6 / 12 / 18 г.\n'
-            'Вода и другие жидкости измеряются объёмом; «горка» к ним не применяется.\n\n'
-            'Порядок значений в строках: чайная / десертная / столовая ложка.',
+            '1. 4 яйца С2 ≈ 3 яйца С1 ≈ 2,5 яйца С0 ≈ 2 яйца СВ.\n\n'
+            '2. В чайную / десертную / столовую ложку помещается:\n'
+            '— жидкости 5 / 10 / 15 мл\n'
+            '— муки без горки 3 / 6 / 9 г, с горкой 5 / 10 / 15 г\n'
+            '— сахара и соли без горки 4 / 8 / 12 г, с горкой 6 / 12 / 18 г.',
           ),
         ),
         actions: [
@@ -4500,7 +4675,7 @@ class _RenderedStep extends StatelessWidget {
 /// Поэтому он меняется при замене типа модуля и остаётся согласованным с
 /// конструктором в режиме просмотра.
 class _StepNumber extends StatelessWidget {
-  const _StepNumber({super.key, required this.number, required this.kind});
+  const _StepNumber({required this.number, required this.kind});
   final int number;
   final CardKind kind;
 

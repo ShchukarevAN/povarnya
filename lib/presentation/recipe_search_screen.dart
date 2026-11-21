@@ -282,6 +282,16 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
     AppSettings().save();
   }
 
+  void _toggleFastingFilter() {
+    setState(() {
+      _fastingFilter = switch (_fastingFilter) {
+        null => RecipeFasting.lean,
+        RecipeFasting.lean => RecipeFasting.nonLean,
+        RecipeFasting.nonLean => null,
+      };
+    });
+  }
+
   void _createRandomRecipeOrder() {
     _randomRecipeIds = catalogRecipes.map((recipe) => recipe.id).toList()
       ..shuffle(math.Random.secure());
@@ -443,20 +453,20 @@ class _RecipeSearchScreenState extends State<RecipeSearchScreen> {
                       spacing: 6,
                       runSpacing: 4,
                       children: [
-                        for (final fasting in RecipeFasting.values)
-                          FilterChip(
-                            avatar: Icon(
-                              fasting == RecipeFasting.lean
-                                  ? Icons.eco_outlined
-                                  : Icons.restaurant_outlined,
-                              size: 18,
-                            ),
-                            label: Text(fasting.title),
-                            selected: _fastingFilter == fasting,
-                            onSelected: (selected) => setState(() {
-                              _fastingFilter = selected ? fasting : null;
-                            }),
+                        FilterChip(
+                          key: const ValueKey('recipe-fasting-toggle'),
+                          avatar: Icon(switch (_fastingFilter) {
+                            RecipeFasting.lean => Icons.eco_outlined,
+                            RecipeFasting.nonLean => Icons.restaurant_outlined,
+                            null => Icons.filter_alt_outlined,
+                          }, size: 18),
+                          label: Text(
+                            _fastingFilter?.title ?? 'Все блюда',
                           ),
+                          selected: _fastingFilter != null,
+                          showCheckmark: false,
+                          onSelected: (_) => _toggleFastingFilter(),
+                        ),
                         Tooltip(
                           message: _randomOrder
                               ? 'Переключить на алфавитный порядок'
@@ -1007,7 +1017,7 @@ class _RecipeResultCardState extends State<_RecipeResultCard>
         ingredients: ingredients,
         ingredientRects: {
           for (final entry in ingredientKeys.entries)
-            if (_rectFor(entry.value) case final rect?) entry.key: rect,
+            entry.key: ?_rectFor(entry.value),
         },
       ),
     );
